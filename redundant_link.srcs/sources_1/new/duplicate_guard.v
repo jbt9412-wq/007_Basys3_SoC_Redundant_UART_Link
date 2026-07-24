@@ -85,7 +85,29 @@ module duplicate_guard #(
     end
 
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || clear) begin
+        if (reset_p) begin
+            out_valid          <= 1'b0;
+            out_frame_length   <= 8'd0;
+            out_device_id      <= 8'd0;
+            out_command        <= 8'd0;
+            out_sequence       <= 8'd0;
+            out_payload_data   <= 128'd0;
+            out_received_crc   <= 16'd0;
+            out_seq_gap        <= 1'b0;
+            out_selected_b     <= 1'b0;
+
+            duplicate_drop     <= 1'b0;
+            duplicate_count    <= 16'd0;
+            history_valid      <= {HISTORY_DEPTH{1'b0}};
+
+            for (reset_index = 0;
+                 reset_index < HISTORY_DEPTH;
+                 reset_index = reset_index + 1) begin
+                history_device_id[reset_index] <= 8'd0;
+                history_sequence[reset_index]  <= 8'd0;
+            end
+        end
+        else if (clear) begin
             out_valid          <= 1'b0;
             out_frame_length   <= 8'd0;
             out_device_id      <= 8'd0;

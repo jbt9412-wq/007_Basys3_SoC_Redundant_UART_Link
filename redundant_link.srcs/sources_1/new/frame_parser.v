@@ -100,7 +100,28 @@ module frame_parser #(
     // Parser FSM, 필드 저장, Timeout 처리
     // -------------------------------------------------------------------------
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || clear) begin
+        if (reset_p) begin
+            state              <= ST_WAIT_SYNC1;
+            payload_remaining  <= 5'd0;
+            interbyte_count    <= {INTERBYTE_CNT_WIDTH{1'b0}};
+            frame_count        <= {FRAME_CNT_WIDTH{1'b0}};
+
+            frame_length       <= 8'd0;
+            device_id          <= 8'd0;
+            command            <= 8'd0;
+            sequence           <= 8'd0;
+            payload_data       <= 128'd0;
+            received_crc       <= 16'd0;
+
+            packet_valid       <= 1'b0;
+            crc_data           <= 8'd0;
+            crc_data_valid     <= 1'b0;
+            crc_start          <= 1'b0;
+            length_error       <= 1'b0;
+            interbyte_timeout  <= 1'b0;
+            frame_timeout      <= 1'b0;
+        end
+        else if (clear) begin
             state              <= ST_WAIT_SYNC1;
             payload_remaining  <= 5'd0;
             interbyte_count    <= {INTERBYTE_CNT_WIDTH{1'b0}};

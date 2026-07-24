@@ -115,7 +115,22 @@ module decision_unit (
     end
 
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || !system_enable) begin
+        if (reset_p) begin
+            decision_valid         <= 1'b0;
+            decision_accept        <= 1'b0;
+            decision_degraded      <= 1'b0;
+            decision_mismatch_drop <= 1'b0;
+            decision_both_invalid  <= 1'b0;
+            decision_selected_b    <= 1'b0;
+            out_frame_length       <= 8'd0;
+            out_device_id          <= 8'd0;
+            out_command            <= 8'd0;
+            out_sequence           <= 8'd0;
+            out_payload_data       <= 128'd0;
+            out_received_crc       <= 16'd0;
+            out_seq_gap            <= 1'b0;
+        end
+        else if (!system_enable) begin
             decision_valid         <= 1'b0;
             decision_accept        <= 1'b0;
             decision_degraded      <= 1'b0;

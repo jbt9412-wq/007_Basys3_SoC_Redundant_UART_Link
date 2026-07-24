@@ -196,7 +196,7 @@ module raw_frame_buffer #(
     // FIFO 저장, Frame Load, Byte Handshake
     // -------------------------------------------------------------------------
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || clear) begin
+        if (reset_p) begin
             write_ptr            <= {PTR_WIDTH{1'b0}};
             read_ptr             <= {PTR_WIDTH{1'b0}};
             frame_count          <= {COUNT_WIDTH{1'b0}};
@@ -220,6 +220,31 @@ module raw_frame_buffer #(
 
             // FIFO Data 자체는 Reset할 필요가 없다.
             // frame_count=0이므로 Reset 이전 값은 읽히지 않는다.
+        end
+        else if (clear) begin
+            write_ptr            <= {PTR_WIDTH{1'b0}};
+            read_ptr             <= {PTR_WIDTH{1'b0}};
+            frame_count          <= {COUNT_WIDTH{1'b0}};
+
+            active               <= 1'b0;
+            byte_index           <= 6'd0;
+            current_length       <= 8'd0;
+            current_device_id    <= 8'd0;
+            current_command      <= 8'd0;
+            current_sequence     <= 8'd0;
+            current_payload      <= 128'd0;
+            current_crc          <= 16'd0;
+            current_seq_gap      <= 1'b0;
+
+            frame_done           <= 1'b0;
+            frame_done_seq_gap   <= 1'b0;
+            overflow_pulse       <= 1'b0;
+            overflow_count       <= 16'd0;
+            length_error_pulse   <= 1'b0;
+            blocked_request      <= 1'b0;
+
+            // FIFO Data 자체는 Clear할 필요가 없다.
+            // frame_count=0이므로 Clear 이전 값은 읽히지 않는다.
         end
         else begin
             // Event 출력은 발생한 순간에만 1이 되는 1클럭 Pulse이다.

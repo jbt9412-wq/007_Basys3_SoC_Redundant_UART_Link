@@ -63,7 +63,16 @@ module seq_monitor (
     // SEQ 기준값 저장 및 프레임 분류
     // -------------------------------------------------------------------------
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || clear) begin
+        if (reset_p) begin
+            seq_accept      <= 1'b0;
+            seq_ok          <= 1'b0;
+            seq_duplicate   <= 1'b0;
+            seq_gap         <= 1'b0;
+            seq_old         <= 1'b0;
+            last_rx_seq     <= 8'h00;
+            seq_initialized <= 1'b0;
+        end
+        else if (clear) begin
             seq_accept      <= 1'b0;
             seq_ok          <= 1'b0;
             seq_duplicate   <= 1'b0;

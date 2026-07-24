@@ -88,7 +88,28 @@ module pair_matcher #(
     assign pair_mismatch[0] = (a_sequence     != b_sequence);
 
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || clear) begin
+        if (reset_p) begin
+            wait_count            <= 32'd0;
+            consume_holdoff       <= 1'b0;
+            pop_a                 <= 1'b0;
+            pop_b                 <= 1'b0;
+            result_valid          <= 1'b0;
+            result_kind           <= RESULT_NONE;
+            result_pair_equal     <= 1'b0;
+            mismatch_flags        <= 6'd0;
+            result_timeout        <= 1'b0;
+            result_seq_skew       <= 1'b0;
+            result_seq_ambiguous  <= 1'b0;
+            pair_wait_active      <= 1'b0;
+            out_frame_length      <= 8'd0;
+            out_device_id         <= 8'd0;
+            out_command           <= 8'd0;
+            out_sequence          <= 8'd0;
+            out_payload_data      <= 128'd0;
+            out_received_crc      <= 16'd0;
+            out_seq_gap           <= 1'b0;
+        end
+        else if (clear) begin
             wait_count            <= 32'd0;
             consume_holdoff       <= 1'b0;
             pop_a                 <= 1'b0;

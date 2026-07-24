@@ -152,7 +152,14 @@ module channel_health_mgr #(
     // Channel A 상태 관리
     // -------------------------------------------------------------------------
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || clear) begin
+        if (reset_p) begin
+            a_fault             <= 1'b0;
+            a_fail_count        <= 8'd0;
+            a_recover_count     <= 8'd0;
+            a_fault_enter_pulse <= 1'b0;
+            a_recovered_pulse   <= 1'b0;
+        end
+        else if (clear) begin
             a_fault             <= 1'b0;
             a_fail_count        <= 8'd0;
             a_recover_count     <= 8'd0;
@@ -210,7 +217,14 @@ module channel_health_mgr #(
     // Channel B 상태 관리
     // -------------------------------------------------------------------------
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || clear) begin
+        if (reset_p) begin
+            b_fault             <= 1'b0;
+            b_fail_count        <= 8'd0;
+            b_recover_count     <= 8'd0;
+            b_fault_enter_pulse <= 1'b0;
+            b_recovered_pulse   <= 1'b0;
+        end
+        else if (clear) begin
             b_fault             <= 1'b0;
             b_fail_count        <= 8'd0;
             b_recover_count     <= 8'd0;

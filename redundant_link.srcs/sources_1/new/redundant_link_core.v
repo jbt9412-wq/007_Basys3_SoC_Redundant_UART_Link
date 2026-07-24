@@ -326,7 +326,14 @@ module redundant_link_core #(
         (b_channel_count >= (effective_channel_timeout - 1'b1));
 
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || datapath_clear) begin
+        if (reset_p) begin
+            channel_a_alive       <= 1'b0;
+            a_seen_valid          <= 1'b0;
+            a_channel_count       <= 32'd0;
+            a_channel_timeout_pulse <= 1'b0;
+            a_timeout_sequence      <= 8'd0;
+        end
+        else if (datapath_clear) begin
             channel_a_alive       <= 1'b0;
             a_seen_valid          <= 1'b0;
             a_channel_count       <= 32'd0;
@@ -353,7 +360,14 @@ module redundant_link_core #(
     end
 
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || datapath_clear) begin
+        if (reset_p) begin
+            channel_b_alive       <= 1'b0;
+            b_seen_valid          <= 1'b0;
+            b_channel_count       <= 32'd0;
+            b_channel_timeout_pulse <= 1'b0;
+            b_timeout_sequence      <= 8'd0;
+        end
+        else if (datapath_clear) begin
             channel_b_alive       <= 1'b0;
             b_seen_valid          <= 1'b0;
             b_channel_count       <= 32'd0;
@@ -805,7 +819,21 @@ module redundant_link_core #(
     assign translated_frame_fire = translation_valid && raw_in_ready;
 
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || datapath_clear) begin
+        if (reset_p) begin
+            translation_reserved   <= 1'b0;
+            translation_crc_active <= 1'b0;
+            translation_valid      <= 1'b0;
+            translation_byte_index <= 6'd0;
+            translation_crc_reg    <= 16'hFFFF;
+            translation_length     <= 8'd0;
+            translation_device_id  <= 8'd0;
+            translation_command    <= 8'd0;
+            translation_sequence   <= 8'd0;
+            translation_payload    <= 128'd0;
+            translation_seq_gap    <= 1'b0;
+            translation_selected_b <= 1'b0;
+        end
+        else if (datapath_clear) begin
             translation_reserved   <= 1'b0;
             translation_crc_active <= 1'b0;
             translation_valid      <= 1'b0;
@@ -935,7 +963,14 @@ module redundant_link_core #(
     reg recovery_default_pulse;
 
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || datapath_clear) begin
+        if (reset_p) begin
+            last_selected_b          <= 1'b0;
+            selection_initialized    <= 1'b0;
+            failover_a_to_b_pulse    <= 1'b0;
+            failover_b_to_a_pulse    <= 1'b0;
+            recovery_default_pulse   <= 1'b0;
+        end
+        else if (datapath_clear) begin
             last_selected_b          <= 1'b0;
             selection_initialized    <= 1'b0;
             failover_a_to_b_pulse    <= 1'b0;

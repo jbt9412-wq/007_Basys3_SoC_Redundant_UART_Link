@@ -115,7 +115,13 @@ module frame_fifo (
     // 프레임 저장, Head 제거, Pointer와 Count 관리
     // -------------------------------------------------------------------------
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p || clear) begin
+        if (reset_p) begin
+            write_ptr      <= 1'b0;
+            read_ptr       <= 1'b0;
+            count          <= 2'd0;
+            overflow_pulse <= 1'b0;
+        end
+        else if (clear) begin
             write_ptr      <= 1'b0;
             read_ptr       <= 1'b0;
             count          <= 2'd0;
