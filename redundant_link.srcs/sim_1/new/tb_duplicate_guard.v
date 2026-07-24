@@ -13,9 +13,11 @@ module tb_duplicate_guard;
 
     reg          clk;
     reg          reset_p;
+    reg          clear;
 
     reg          decision_valid;
     reg          decision_accept;
+    reg          statistics_clear;
 
     reg  [7:0]   in_frame_length;
     reg  [7:0]   in_device_id;
@@ -24,6 +26,7 @@ module tb_duplicate_guard;
     reg  [127:0] in_payload_data;
     reg  [15:0]  in_received_crc;
     reg          in_seq_gap;
+    reg          in_selected_b;
 
     wire         out_valid;
     wire [7:0]   out_frame_length;
@@ -33,6 +36,7 @@ module tb_duplicate_guard;
     wire [127:0] out_payload_data;
     wire [15:0]  out_received_crc;
     wire         out_seq_gap;
+    wire         out_selected_b;
 
     wire         duplicate_drop;
     wire [15:0]  duplicate_count;
@@ -44,9 +48,11 @@ module tb_duplicate_guard;
     ) dut (
         .clk                (clk),
         .reset_p            (reset_p),
+        .clear              (clear),
 
         .decision_valid     (decision_valid),
         .decision_accept    (decision_accept),
+        .statistics_clear   (statistics_clear),
 
         .in_frame_length    (in_frame_length),
         .in_device_id       (in_device_id),
@@ -55,6 +61,7 @@ module tb_duplicate_guard;
         .in_payload_data    (in_payload_data),
         .in_received_crc    (in_received_crc),
         .in_seq_gap         (in_seq_gap),
+        .in_selected_b      (in_selected_b),
 
         .out_valid          (out_valid),
         .out_frame_length   (out_frame_length),
@@ -64,6 +71,7 @@ module tb_duplicate_guard;
         .out_payload_data   (out_payload_data),
         .out_received_crc   (out_received_crc),
         .out_seq_gap        (out_seq_gap),
+        .out_selected_b     (out_selected_b),
 
         .duplicate_drop     (duplicate_drop),
         .duplicate_count    (duplicate_count)
@@ -74,6 +82,7 @@ module tb_duplicate_guard;
 
     task apply_reset;
         begin
+            clear   = 1'b0;
             reset_p = 1'b1;
             repeat (2) @(negedge clk);
             reset_p = 1'b0;
@@ -106,6 +115,7 @@ module tb_duplicate_guard;
             };
             in_received_crc = 16'h5AA5;
             in_seq_gap      = 1'b0;
+            in_selected_b   = sequence[0];
 
             @(posedge clk);
             #1;
@@ -131,7 +141,7 @@ module tb_duplicate_guard;
                 );
             end
 
-            if (expected_out_valid) begin
+            if (expected_out_valid || expected_duplicate_drop) begin
                 if ((out_frame_length !== 8'd7)                  ||
                     (out_device_id    !== device_id)             ||
                     (out_command      !== 8'h31)                 ||
@@ -140,11 +150,12 @@ module tb_duplicate_guard;
                         96'h0, device_id, sequence, 16'hA55A
                     })                                           ||
                     (out_received_crc !== 16'h5AA5)              ||
-                    (out_seq_gap      !== 1'b0)) begin
+                    (out_seq_gap      !== 1'b0)                  ||
+                    (out_selected_b   !== sequence[0])) begin
 
                     error_count = error_count + 1;
                     $display(
-                        "[FAIL] time=%0t forwarded frame data mismatch",
+                        "[FAIL] time=%0t forwarded/drop metadata mismatch",
                         $time
                     );
                 end
@@ -167,8 +178,10 @@ module tb_duplicate_guard;
 
     initial begin
         reset_p          = 1'b1;
+        clear            = 1'b0;
         decision_valid   = 1'b0;
         decision_accept  = 1'b0;
+        statistics_clear = 1'b0;
         in_frame_length  = 8'd0;
         in_device_id     = 8'd0;
         in_command       = 8'd0;
@@ -176,6 +189,7 @@ module tb_duplicate_guard;
         in_payload_data  = 128'd0;
         in_received_crc  = 16'd0;
         in_seq_gap       = 1'b0;
+        in_selected_b    = 1'b0;
         error_count      = 0;
 
         apply_reset;
@@ -221,8 +235,59 @@ module tb_duplicate_guard;
         // SEQ=01은 최근 4개 이력에서 밀려났으므로 다시 통과한다.
         send_and_check(1'b1, 8'h01, 8'h01, 1'b1, 1'b0, 16'd0);
 
+        // ---------------------------------------------------------------------
+        // 6. statistics_clear는 카운터만 동기적으로 지우고 이력은 보존한다.
+        // ---------------------------------------------------------------------
+        apply_reset;
+        send_and_check(1'b1, 8'h03, 8'h71, 1'b1, 1'b0, 16'd0);
+        send_and_check(1'b1, 8'h03, 8'h71, 1'b0, 1'b1, 16'd1);
+
+        @(negedge clk);
+        statistics_clear = 1'b1;
+        #1;
+        if (duplicate_count !== 16'd1) begin
+            error_count = error_count + 1;
+            $display("[FAIL] statistics_clear acted asynchronously at time=%0t",
+                     $time);
+        end
+
+        @(posedge clk);
+        #1;
+        if (duplicate_count !== 16'd0) begin
+            error_count = error_count + 1;
+            $display("[FAIL] statistics_clear did not clear the counter");
+        end
+
+        @(negedge clk);
+        statistics_clear = 1'b0;
+        send_and_check(1'b1, 8'h03, 8'h71, 1'b0, 1'b1, 16'd1);
+
+        // ---------------------------------------------------------------------
+        // 7. clear is synchronous and clears both counter and duplicate history.
+        // ---------------------------------------------------------------------
+        @(negedge clk);
+        clear = 1'b1;
+        #1;
+        if (duplicate_count !== 16'd1) begin
+            error_count = error_count + 1;
+            $display("[FAIL] clear acted asynchronously at time=%0t", $time);
+        end
+
+        @(posedge clk);
+        #1;
+        if ((duplicate_count !== 16'd0) ||
+            (out_valid !== 1'b0) ||
+            (duplicate_drop !== 1'b0)) begin
+            error_count = error_count + 1;
+            $display("[FAIL] synchronous clear did not reset duplicate_guard");
+        end
+
+        @(negedge clk);
+        clear = 1'b0;
+        send_and_check(1'b1, 8'h03, 8'h71, 1'b1, 1'b0, 16'd0);
+
         if (error_count == 0)
-            $display("[PASS] All duplicate_guard core tests passed.");
+            $display("[PASS] All duplicate_guard final-interface tests passed.");
         else
             $display("[FAIL] error_count=%0d", error_count);
 

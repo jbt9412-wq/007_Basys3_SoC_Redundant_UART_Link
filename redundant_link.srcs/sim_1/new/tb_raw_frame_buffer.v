@@ -16,6 +16,8 @@ module tb_raw_frame_buffer;
 
     reg          clk;
     reg          reset_p;
+    reg          clear;
+    reg          statistics_clear;
 
     reg          in_valid;
     wire         in_ready;
@@ -57,6 +59,8 @@ module tb_raw_frame_buffer;
     ) dut (
         .clk                  (clk),
         .reset_p              (reset_p),
+        .clear                (clear),
+        .statistics_clear     (statistics_clear),
 
         .in_valid             (in_valid),
         .in_ready             (in_ready),
@@ -222,6 +226,8 @@ module tb_raw_frame_buffer;
 
     initial begin
         reset_p            = 1'b1;
+        clear              = 1'b0;
+        statistics_clear   = 1'b0;
         in_valid           = 1'b0;
         in_frame_length    = 8'd0;
         in_device_id       = 8'd0;
@@ -314,24 +320,66 @@ module tb_raw_frame_buffer;
             );
         end
 
-        // FIFO가 가득 찬 상태의 추가 Frame은 차단한다.
-        send_frame(
-            8'd3, 8'h04, 8'h33, 8'h23, 128'd0, 16'h5678,
-            1'b0, 1'b1, 1'b0
+        // ---------------------------------------------------------------------
+        // 4. 정상 Backpressure:
+        //    FIFO가 Full이어도 Producer가 valid/data를 유지하면 유실이
+        //    아니므로 overflow가 발생하지 않아야 한다. 공간이 생기면
+        //    같은 요청을 그대로 Handshake한다.
+        // ---------------------------------------------------------------------
+        append_expected_frame(
+            8'd3, 8'h04, 8'h33, 8'h23, 128'd0, 16'h5678
         );
 
-        if (overflow_count !== 16'd1) begin
+        @(negedge clk);
+        in_valid        = 1'b1;
+        in_frame_length = 8'd3;
+        in_device_id    = 8'h04;
+        in_command      = 8'h33;
+        in_sequence     = 8'h23;
+        in_payload_data = 128'd0;
+        in_received_crc = 16'h5678;
+        in_seq_gap      = 1'b1;
+
+        repeat (3) begin
+            @(posedge clk);
+            #1;
+
+            if ((in_ready !== 1'b0) ||
+                (overflow_pulse !== 1'b0) ||
+                (overflow_count !== 16'd0)) begin
+
+                error_count = error_count + 1;
+                $display(
+                    "[FAIL] time=%0t normal backpressure ready=%b pulse=%b count=%0d",
+                    $time,
+                    in_ready,
+                    overflow_pulse,
+                    overflow_count
+                );
+            end
+        end
+
+        @(negedge clk);
+        tx_ready = 1'b1;
+
+        wait (in_ready === 1'b1);
+        @(posedge clk);
+        #1;
+
+        if ((overflow_pulse !== 1'b0) ||
+            (overflow_count !== 16'd0)) begin
+
             error_count = error_count + 1;
             $display(
-                "[FAIL] time=%0t overflow_count=%0d expected=1",
-                $time,
-                overflow_count
+                "[FAIL] time=%0t accepted stalled request counted as overflow",
+                $time
             );
         end
 
-        // UART가 Byte를 받을 수 있게 하고 저장된 3개 Frame을 모두 보낸다.
         @(negedge clk);
-        tx_ready = 1'b1;
+        in_valid = 1'b0;
+
+        // UART가 저장된 4개 Frame을 모두 보낸다.
 
         wait_count = 0;
         while ((expected_read < expected_write) && (wait_count < 200)) begin
@@ -351,10 +399,10 @@ module tb_raw_frame_buffer;
         // 마지막 frame_done Pulse가 Monitor에 반영될 시간을 준다.
         repeat (2) @(posedge clk);
 
-        if (frame_done_count !== 3) begin
+        if (frame_done_count !== 4) begin
             error_count = error_count + 1;
             $display(
-                "[FAIL] frame_done_count=%0d expected=3",
+                "[FAIL] frame_done_count=%0d expected=4",
                 frame_done_count
             );
         end
@@ -366,7 +414,121 @@ module tb_raw_frame_buffer;
         end
 
         // ---------------------------------------------------------------------
-        // 4. LEN=2는 잘못된 Frame이므로 FIFO에 저장하지 않는다.
+        // ---------------------------------------------------------------------
+        // 5. 실제 유실:
+        //    Full에서 막힌 요청을 Handshake 전에 철회하면 정확히 한 번
+        //    overflow로 기록해야 한다.
+        // ---------------------------------------------------------------------
+        @(negedge clk);
+        tx_ready = 1'b0;
+
+        send_frame(
+            8'd3, 8'h10, 8'h40, 8'h30, 128'd0, 16'h1001,
+            1'b0, 1'b0, 1'b0
+        );
+
+        wait (tx_valid === 1'b1);
+
+        send_frame(
+            8'd3, 8'h11, 8'h41, 8'h31, 128'd0, 16'h1002,
+            1'b0, 1'b0, 1'b0
+        );
+
+        send_frame(
+            8'd3, 8'h12, 8'h42, 8'h32, 128'd0, 16'h1003,
+            1'b0, 1'b0, 1'b0
+        );
+
+        if ((buffer_full !== 1'b1) || (in_ready !== 1'b0)) begin
+            error_count = error_count + 1;
+            $display("[FAIL] withdrawal setup did not fill FIFO");
+        end
+
+        @(negedge clk);
+        in_valid        = 1'b1;
+        in_frame_length = 8'd3;
+        in_device_id    = 8'h13;
+        in_command      = 8'h43;
+        in_sequence     = 8'h33;
+        in_payload_data = 128'd0;
+        in_received_crc = 16'h1004;
+        in_seq_gap      = 1'b0;
+
+        repeat (2) begin
+            @(posedge clk);
+            #1;
+            if ((overflow_pulse !== 1'b0) ||
+                (overflow_count !== 16'd0)) begin
+
+                error_count = error_count + 1;
+                $display("[FAIL] held blocked request counted as overflow");
+            end
+        end
+
+        @(negedge clk);
+        in_valid = 1'b0;
+
+        @(posedge clk);
+        #1;
+        if ((overflow_pulse !== 1'b1) ||
+            (overflow_count !== 16'd1)) begin
+
+            error_count = error_count + 1;
+            $display(
+                "[FAIL] withdrawn request overflow pulse=%b count=%0d expected=1/1",
+                overflow_pulse,
+                overflow_count
+            );
+        end
+
+        @(posedge clk);
+        #1;
+        if ((overflow_pulse !== 1'b0) ||
+            (overflow_count !== 16'd1)) begin
+
+            error_count = error_count + 1;
+            $display("[FAIL] withdrawal overflow was not exactly one pulse");
+        end
+
+        // statistics_clear는 FIFO 내용과 무관하게 Count만 동기식 Clear한다.
+        @(negedge clk);
+        statistics_clear = 1'b1;
+        #1;
+        if (overflow_count !== 16'd1) begin
+            error_count = error_count + 1;
+            $display("[FAIL] statistics_clear changed count asynchronously");
+        end
+
+        @(posedge clk);
+        #1;
+        if ((overflow_count !== 16'd0) || (buffer_full !== 1'b1)) begin
+            error_count = error_count + 1;
+            $display("[FAIL] statistics_clear result/state mismatch");
+        end
+
+        @(negedge clk);
+        statistics_clear = 1'b0;
+        clear = 1'b1;
+        #1;
+        if (buffer_full !== 1'b1) begin
+            error_count = error_count + 1;
+            $display("[FAIL] clear changed FIFO state asynchronously");
+        end
+
+        @(posedge clk);
+        #1;
+        if ((buffer_busy !== 1'b0) ||
+            (buffered_count !== 8'd0)) begin
+
+            error_count = error_count + 1;
+            $display("[FAIL] synchronous clear did not empty buffer");
+        end
+
+        @(negedge clk);
+        clear = 1'b0;
+
+        // ---------------------------------------------------------------------
+        // 6. LEN=2는 잘못된 Frame이므로 FIFO에 저장하지 않는다.
         // ---------------------------------------------------------------------
         send_frame(
             8'd2, 8'h05, 8'h34, 8'h24, 128'd0, 16'h9ABC,

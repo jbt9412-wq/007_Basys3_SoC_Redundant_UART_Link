@@ -23,6 +23,8 @@ module tb_event_fifo;
 
     reg                    clk;
     reg                    reset_p;
+    reg                    clear_fifo;
+    reg                    statistics_clear;
 
     reg                    event_valid;
     wire                   event_ready;
@@ -49,6 +51,8 @@ module tb_event_fifo;
     ) dut (
         .clk              (clk),
         .reset_p          (reset_p),
+        .clear_fifo       (clear_fifo),
+        .statistics_clear (statistics_clear),
         .event_valid      (event_valid),
         .event_ready      (event_ready),
         .event_data       (event_data),
@@ -167,6 +171,8 @@ module tb_event_fifo;
 
     initial begin
         reset_p         = 1'b1;
+        clear_fifo      = 1'b0;
+        statistics_clear = 1'b0;
         event_valid     = 1'b0;
         event_data      = {EVENT_WIDTH{1'b0}};
         pop_request     = 1'b0;
@@ -369,11 +375,66 @@ module tb_event_fifo;
         pop_expect(test_event[21]);
 
         // ---------------------------------------------------------------------
-        // TEST 8: Reset이 FIFO 상태와 진단 Count를 모두 초기화
+        // TEST 8: statistics_clear는 FIFO 내용은 보존하고 Count만 동기 Clear
         // ---------------------------------------------------------------------
         push_event(test_event[22]);
         push_event(test_event[23]);
+        check_u8(event_count, 8'd2, "pre-statistics-clear fifo count");
+
+        @(negedge clk);
+        statistics_clear = 1'b1;
+        #1;
+        check_u16(underflow_count, 16'd2,
+                  "statistics clear not asynchronous");
+        check_u8(event_count, 8'd2,
+                 "statistics clear pre-edge fifo count");
+
+        @(posedge clk);
+        #1;
+        check_u16(underflow_count, 16'd0,
+                  "statistics clear underflow count");
+        check_u8(event_count, 8'd2,
+                 "statistics clear preserves fifo contents");
+        check_event_data(front_data, test_event[22],
+                         "statistics clear preserves front");
+
+        @(negedge clk);
+        statistics_clear = 1'b0;
+
+        // ---------------------------------------------------------------------
+        // TEST 9: clear_fifo는 저장 상태를 동기식 Clear
+        // ---------------------------------------------------------------------
+        clear_fifo = 1'b1;
+        #1;
+        check_u8(event_count, 8'd2, "fifo clear not asynchronous");
+
+        @(posedge clk);
+        #1;
+        check_u8(event_count, 8'd0, "fifo clear count");
+        check_bit(fifo_empty, 1'b1, "fifo clear empty");
+        check_bit(front_valid, 1'b0, "fifo clear front invalid");
+        check_u16(underflow_count, 16'd0,
+                  "fifo clear preserves diagnostic count");
+
+        @(negedge clk);
+        clear_fifo = 1'b0;
+
+        // Reset 검증용으로 상태와 진단 Count를 다시 만든다.
+        pop_request = 1'b1;
+        @(posedge clk);
+        #1;
+        check_u16(underflow_count, 16'd1,
+                  "pre-reset underflow count");
+        @(negedge clk);
+        pop_request = 1'b0;
+
+        push_event(test_event[24]);
+        push_event(test_event[25]);
         check_u8(event_count, 8'd2, "pre-reset count");
+
+        // ---------------------------------------------------------------------
+        // TEST 10: Reset이 FIFO 상태와 진단 Count를 모두 초기화
+        // ---------------------------------------------------------------------
 
         apply_reset;
 

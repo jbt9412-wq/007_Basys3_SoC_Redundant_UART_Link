@@ -28,6 +28,7 @@ module uart_tx #(
 )(
     input  wire       clk,
     input  wire       reset_p,
+    input  wire       clear,
 
     // raw_frame_buffer와 연결되는 Byte 입력
     input  wire       tx_valid,
@@ -58,7 +59,7 @@ module uart_tx #(
     reg [7:0]                  shift_reg;
 
     // Reset 중에는 입력을 받지 않고, Idle 상태에서만 새 Byte를 받는다.
-    assign tx_ready = !reset_p && !tx_busy;
+    assign tx_ready = !reset_p && !clear && !tx_busy;
 
     always @(posedge clk or posedge reset_p) begin
         if (reset_p) begin
@@ -68,6 +69,14 @@ module uart_tx #(
             baud_count <= {BAUD_COUNT_WIDTH{1'b0}};
             bit_index <= 4'd0;
             shift_reg <= 8'd0;
+        end
+        else if (clear) begin
+            uart_txd   <= 1'b1;
+            tx_busy    <= 1'b0;
+            tx_done    <= 1'b0;
+            baud_count <= {BAUD_COUNT_WIDTH{1'b0}};
+            bit_index  <= 4'd0;
+            shift_reg  <= 8'd0;
         end
         else begin
             // Byte 하나의 Stop Bit까지 끝난 순간에만 1클럭 Pulse가 된다.

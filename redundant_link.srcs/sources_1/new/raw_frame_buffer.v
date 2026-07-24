@@ -35,6 +35,8 @@ module raw_frame_buffer #(
 )(
     input  wire         clk,
     input  wire         reset_p,
+    input  wire         clear,
+    input  wire         statistics_clear,
 
     // duplicate_guard 출력과 연결되는 Frame 입력
     input  wire         in_valid,
@@ -106,6 +108,7 @@ module raw_frame_buffer #(
     wire push_frame;
     wire overflow_event;
     wire length_error_event;
+    reg  blocked_request;
 
     assign length_valid =
         (in_frame_length >= 8'd3) &&
@@ -121,13 +124,33 @@ module raw_frame_buffer #(
 
     assign in_ready           = fifo_has_space;
     assign push_frame         = in_valid && length_valid && fifo_has_space;
-    assign overflow_event     = in_valid && length_valid && !fifo_has_space;
+    // ready/valid Backpressure 중에는 Producer가 valid와 데이터를 유지한다.
+    // 이 정상 Stall 자체는 Overflow가 아니다. Stall된 요청이 Handshake 없이
+    // 철회된 경우에만 실제 유실로 보고 1회 Overflow를 발생시킨다.
+    assign overflow_event     = blocked_request && !in_valid;
     assign length_error_event = in_valid && !length_valid;
 
     assign tx_valid       = active;
     assign buffer_busy    = active || !fifo_empty;
     assign buffer_full    = fifo_full;
     assign buffered_count = frame_count;
+
+    // FIFO 데이터 배열은 Reset/Clear가 필요하지 않다. 쓰기 동작을
+    // 비동기 Reset 제어 블록과 분리하여 RAM으로 추론될 수 있게 한다.
+    // Reset/Clear가 유효한 클럭에는 기존과 동일하게 쓰기를 수행하지 않는다.
+    always @(posedge clk) begin
+        if (!reset_p && !clear && push_frame) begin
+            fifo_mem[write_ptr] <= {
+                in_frame_length,
+                in_device_id,
+                in_command,
+                in_sequence,
+                in_payload_data,
+                in_received_crc,
+                in_seq_gap
+            };
+        end
+    end
 
     // -------------------------------------------------------------------------
     // 현재 Byte 선택
@@ -193,9 +216,35 @@ module raw_frame_buffer #(
             overflow_pulse       <= 1'b0;
             overflow_count       <= 16'd0;
             length_error_pulse   <= 1'b0;
+            blocked_request      <= 1'b0;
 
             // FIFO Data 자체는 Reset할 필요가 없다.
             // frame_count=0이므로 Reset 이전 값은 읽히지 않는다.
+        end
+        else if (clear) begin
+            write_ptr            <= {PTR_WIDTH{1'b0}};
+            read_ptr             <= {PTR_WIDTH{1'b0}};
+            frame_count          <= {COUNT_WIDTH{1'b0}};
+
+            active               <= 1'b0;
+            byte_index           <= 6'd0;
+            current_length       <= 8'd0;
+            current_device_id    <= 8'd0;
+            current_command      <= 8'd0;
+            current_sequence     <= 8'd0;
+            current_payload      <= 128'd0;
+            current_crc          <= 16'd0;
+            current_seq_gap      <= 1'b0;
+
+            frame_done           <= 1'b0;
+            frame_done_seq_gap   <= 1'b0;
+            overflow_pulse       <= 1'b0;
+            overflow_count       <= 16'd0;
+            length_error_pulse   <= 1'b0;
+            blocked_request      <= 1'b0;
+
+            // FIFO Data 자체는 Clear할 필요가 없다.
+            // frame_count=0이므로 Clear 이전 값은 읽히지 않는다.
         end
         else begin
             // Event 출력은 발생한 순간에만 1이 되는 1클럭 Pulse이다.
@@ -204,28 +253,31 @@ module raw_frame_buffer #(
             overflow_pulse     <= 1'b0;
             length_error_pulse <= 1'b0;
 
+            if (statistics_clear)
+                overflow_count <= 16'd0;
+
             if (length_error_event)
                 length_error_pulse <= 1'b1;
+
+            if (!blocked_request) begin
+                if (in_valid && length_valid && !fifo_has_space)
+                    blocked_request <= 1'b1;
+            end
+            else if (!in_valid || push_frame) begin
+                blocked_request <= 1'b0;
+            end
 
             if (overflow_event) begin
                 overflow_pulse <= 1'b1;
 
-                if (overflow_count != 16'hFFFF)
+                if (!statistics_clear &&
+                    (overflow_count != 16'hFFFF))
                     overflow_count <= overflow_count + 1'b1;
             end
 
-            // 새 Frame을 FIFO에 저장한다.
+            // 새 Frame의 데이터 저장은 위의 Reset 없는 FIFO 쓰기 블록에서
+            // 수행하고, 여기서는 Write Pointer만 갱신한다.
             if (push_frame) begin
-                fifo_mem[write_ptr] <= {
-                    in_frame_length,
-                    in_device_id,
-                    in_command,
-                    in_sequence,
-                    in_payload_data,
-                    in_received_crc,
-                    in_seq_gap
-                };
-
                 if (write_ptr == FRAME_DEPTH - 1)
                     write_ptr <= {PTR_WIDTH{1'b0}};
                 else

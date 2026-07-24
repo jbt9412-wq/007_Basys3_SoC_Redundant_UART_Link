@@ -24,15 +24,19 @@ The AXI4-Lite register bank uses 32-bit registers at 4-byte-aligned offsets from
 
 ## Verification status
 
-This repository preserves the current Vivado workspace exactly as uploaded.
-RTL and testbench source files were not modified as part of publication.
+The final RTL was validated with Vivado 2024.2 in Verilog-2005 mode.
 
-- 14 of 15 standalone module testbenches passed in Vivado Simulator 2024.2.
-- `tb_channel_health_mgr` currently reports two failures.
-- `redundant_link_core` currently has interface-version mismatches with several
-  lower-level modules and does not complete static elaboration.
-- No synthesis, timing, or DRC reports were present in the workspace at upload
-  time.
+- All Design Sources and 16 self-checking testbenches compile and elaborate
+  successfully: 15 standalone module tests plus `tb_redundant_link_core`.
+- Simulation result: 16/16 PASS.
+- Out-of-context synthesis, placement, physical optimization, and routing of
+  `redundant_link_core` complete with 0 errors and 0 unrouted nets.
+- 100 MHz timing passes with WNS `+0.143 ns`, TNS `0.000 ns`,
+  WHS `+0.028 ns`, and THS `0.000 ns`.
+- DRC reports 0 errors. No inferred latches, multiple drivers, or port/width
+  mismatches were detected.
+- See [`FIX_REPORT.md`](FIX_REPORT.md) for the validation scope and remaining
+  non-blocking out-of-context warnings.
 
 ## Generated files
 

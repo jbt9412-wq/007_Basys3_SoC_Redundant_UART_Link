@@ -20,6 +20,7 @@ module tb_frame_fifo;
 
     reg         clk;
     reg         reset_p;
+    reg         clear;
 
     reg         push;
     reg  [7:0]  in_frame_length;
@@ -48,6 +49,7 @@ module tb_frame_fifo;
     frame_fifo dut (
         .clk              (clk),
         .reset_p          (reset_p),
+        .clear            (clear),
         .push             (push),
         .in_frame_length  (in_frame_length),
         .in_device_id     (in_device_id),
@@ -76,6 +78,7 @@ module tb_frame_fifo;
 
     initial begin
         reset_p         = 1'b1;
+        clear           = 1'b0;
         push            = 1'b0;
         pop             = 1'b0;
         in_frame_length = 8'd0;

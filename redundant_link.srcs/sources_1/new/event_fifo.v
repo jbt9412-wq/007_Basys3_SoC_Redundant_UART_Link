@@ -38,6 +38,8 @@ module event_fifo #(
 )(
     input  wire                     clk,
     input  wire                     reset_p,
+    input  wire                     clear_fifo,
+    input  wire                     statistics_clear,
 
     // event_arbiter와 연결되는 입력
     input  wire                     event_valid,
@@ -82,12 +84,21 @@ module event_fifo #(
 
     // Full 상태에서도 같은 클럭에 Pop이 확정되면 한 칸이 비므로
     // 새 Event를 동시에 받을 수 있다.
-    assign pop_event   = pop_request && !fifo_empty;
-    assign event_ready = !fifo_full || pop_event;
+    assign pop_event   = pop_request && !fifo_empty && !clear_fifo;
+    assign event_ready = !clear_fifo && (!fifo_full || pop_event);
     assign push_event  = event_valid && event_ready;
 
-    assign underflow_event = pop_request && fifo_empty;
+    assign underflow_event =
+        pop_request && fifo_empty && !clear_fifo;
     assign event_count = count;
+
+    // FIFO 데이터 배열은 Reset/Clear하지 않는다. 데이터 쓰기를 비동기
+    // Reset 제어 블록과 분리하여 RAM 추론을 막는 비동기 Set/Reset
+    // 구조가 생기지 않게 한다. Reset/Clear 클럭의 쓰기 금지는 유지한다.
+    always @(posedge clk) begin
+        if (!reset_p && !clear_fifo && push_event)
+            fifo_mem[write_ptr] <= event_data;
+    end
 
     always @(posedge clk or posedge reset_p) begin
         if (reset_p) begin
@@ -103,34 +114,43 @@ module event_fifo #(
         else begin
             underflow_pulse <= 1'b0;
 
+            if (statistics_clear)
+                underflow_count <= 16'd0;
+
             if (underflow_event) begin
                 underflow_pulse <= 1'b1;
 
-                if (underflow_count != 16'hFFFF)
+                if (!statistics_clear &&
+                    (underflow_count != 16'hFFFF))
                     underflow_count <= underflow_count + 1'b1;
             end
 
-            if (push_event) begin
-                fifo_mem[write_ptr] <= event_data;
-
-                if (write_ptr == FIFO_DEPTH - 1)
-                    write_ptr <= {PTR_WIDTH{1'b0}};
-                else
-                    write_ptr <= write_ptr + 1'b1;
+            if (clear_fifo) begin
+                write_ptr <= {PTR_WIDTH{1'b0}};
+                read_ptr  <= {PTR_WIDTH{1'b0}};
+                count     <= {COUNT_WIDTH{1'b0}};
             end
+            else begin
+                if (push_event) begin
+                    if (write_ptr == FIFO_DEPTH - 1)
+                        write_ptr <= {PTR_WIDTH{1'b0}};
+                    else
+                        write_ptr <= write_ptr + 1'b1;
+                end
 
-            if (pop_event) begin
-                if (read_ptr == FIFO_DEPTH - 1)
-                    read_ptr <= {PTR_WIDTH{1'b0}};
-                else
-                    read_ptr <= read_ptr + 1'b1;
+                if (pop_event) begin
+                    if (read_ptr == FIFO_DEPTH - 1)
+                        read_ptr <= {PTR_WIDTH{1'b0}};
+                    else
+                        read_ptr <= read_ptr + 1'b1;
+                end
+
+                case ({push_event, pop_event})
+                    2'b10: count <= count + 1'b1;
+                    2'b01: count <= count - 1'b1;
+                    default: count <= count;
+                endcase
             end
-
-            case ({push_event, pop_event})
-                2'b10: count <= count + 1'b1;
-                2'b01: count <= count - 1'b1;
-                default: count <= count;
-            endcase
         end
     end
 

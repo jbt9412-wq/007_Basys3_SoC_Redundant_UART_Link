@@ -25,6 +25,7 @@ module tb_seq_monitor;
 
     reg        clk;
     reg        reset_p;
+    reg        clear;
     reg        seq_valid;
     reg  [7:0] tb_seq_value;
 
@@ -43,6 +44,7 @@ module tb_seq_monitor;
     seq_monitor dut (
         .clk             (clk),
         .reset_p         (reset_p),
+        .clear           (clear),
         .seq_valid       (seq_valid),
         .seq_value       (tb_seq_value),
         .seq_accept      (seq_accept),
@@ -239,6 +241,7 @@ module tb_seq_monitor;
 
     initial begin
         reset_p     = 1'b1;
+        clear       = 1'b0;
         seq_valid   = 1'b0;
         tb_seq_value = 8'h00;
         pass_count  = 0;

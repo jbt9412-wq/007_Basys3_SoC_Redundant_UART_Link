@@ -37,6 +37,7 @@ module uart_rx #(
 )(
     input  wire       clk,             // FPGA 시스템 클럭
     input  wire       reset_p,         // Active-High 비동기 리셋
+    input  wire       clear,           // Active-High 동기 Clear
     input  wire       rx,              // 외부 UART 수신선(Idle 상태는 High)
 
     output reg  [7:0] rx_data,         // 정상적으로 복원된 수신 데이터 1바이트
@@ -108,6 +109,9 @@ module uart_rx #(
         if (reset_p) begin
             rx_sync_ff <= 2'b11;
         end
+        else if (clear) begin
+            rx_sync_ff <= 2'b11;
+        end
         else begin
             rx_sync_ff[0] <= rx;            // 1단: 외부 비동기 신호 수신
             rx_sync_ff[1] <= rx_sync_ff[0]; // 2단: FSM에 전달할 안정된 신호
@@ -120,6 +124,15 @@ module uart_rx #(
     always @(posedge clk or posedge reset_p) begin
         if (reset_p) begin
             // 리셋 시 수신 대기 상태로 돌아가고 내부 값을 초기화한다.
+            state          <= ST_IDLE;
+            baud_count     <= {BAUD_CNT_WIDTH{1'b0}};
+            bit_index      <= 3'd0;
+            rx_shift       <= 8'd0;
+            rx_data        <= 8'd0;
+            rx_valid       <= 1'b0;
+            rx_frame_error <= 1'b0;
+        end
+        else if (clear) begin
             state          <= ST_IDLE;
             baud_count     <= {BAUD_CNT_WIDTH{1'b0}};
             bit_index      <= 3'd0;

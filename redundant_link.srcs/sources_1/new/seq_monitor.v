@@ -31,6 +31,7 @@
 module seq_monitor (
     input  wire       clk,
     input  wire       reset_p,
+    input  wire       clear,
 
     // CRC가 정상인 프레임이 준비되었음을 알리는 1클럭 펄스
     input  wire       seq_valid,
@@ -63,6 +64,15 @@ module seq_monitor (
     // -------------------------------------------------------------------------
     always @(posedge clk or posedge reset_p) begin
         if (reset_p) begin
+            seq_accept      <= 1'b0;
+            seq_ok          <= 1'b0;
+            seq_duplicate   <= 1'b0;
+            seq_gap         <= 1'b0;
+            seq_old         <= 1'b0;
+            last_rx_seq     <= 8'h00;
+            seq_initialized <= 1'b0;
+        end
+        else if (clear) begin
             seq_accept      <= 1'b0;
             seq_ok          <= 1'b0;
             seq_duplicate   <= 1'b0;

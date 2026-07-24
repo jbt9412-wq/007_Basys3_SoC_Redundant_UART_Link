@@ -19,6 +19,11 @@ xsim.dir/
 *.bit
 *.bin
 *.ltx
+*.zip
+
+# Local reference bundles (never publish)
+redundant_link_rtl_final/
+redundant_link.srcs/redundant_link_rtl_final/
 
 # Editor/OS files
 *~

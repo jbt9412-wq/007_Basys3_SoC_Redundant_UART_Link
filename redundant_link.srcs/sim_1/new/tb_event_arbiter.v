@@ -14,7 +14,8 @@
 
 module tb_event_arbiter;
 
-    localparam integer SOURCE_COUNT = 4;
+    // 실제 Core 구성과 같은 16개 Source로 검증한다.
+    localparam integer SOURCE_COUNT = 16;
     localparam integer EVENT_WIDTH  = 64;
 
     localparam [63:0] EVENT_A = 64'h0000_0001_AA00_0001;
@@ -26,6 +27,7 @@ module tb_event_arbiter;
 
     reg clk;
     reg reset_p;
+    reg statistics_clear;
 
     reg  [SOURCE_COUNT-1:0] source_valid;
     reg  [(SOURCE_COUNT*EVENT_WIDTH)-1:0] source_data;
@@ -47,6 +49,7 @@ module tb_event_arbiter;
     ) dut (
         .clk              (clk),
         .reset_p          (reset_p),
+        .statistics_clear (statistics_clear),
         .source_valid     (source_valid),
         .source_data      (source_data),
         .event_valid      (event_valid),
@@ -156,6 +159,7 @@ module tb_event_arbiter;
     initial begin
         clk          = 1'b0;
         reset_p      = 1'b1;
+        statistics_clear = 1'b0;
         source_valid = {SOURCE_COUNT{1'b0}};
         source_data  = {(SOURCE_COUNT*EVENT_WIDTH){1'b0}};
         event_ready  = 1'b0;
@@ -279,6 +283,57 @@ module tb_event_arbiter;
         consume_expect(EVENT_B, "multi collision consume source1");
         consume_expect(EVENT_C, "multi collision consume source2");
         check_bit(pending_any, 1'b0, "final pending empty");
+
+        // ---------------------------------------------------------------------
+        // TEST 7: statistics_clear는 진단 Count만 동기식 Clear
+        // ---------------------------------------------------------------------
+        @(negedge clk);
+        statistics_clear = 1'b1;
+        #1;
+        check_u16(event_lost_count, 16'd3,
+                  "statistics clear not asynchronous");
+
+        @(posedge clk);
+        #1;
+        check_u16(event_lost_count, 16'd0,
+                  "statistics clear count");
+        check_bit(pending_any, 1'b0,
+                  "statistics clear preserves pending state");
+
+        @(negedge clk);
+        statistics_clear = 1'b0;
+
+        // ---------------------------------------------------------------------
+        // TEST 8: Core의 16-Source 구성에서 동시 충돌 수를 정확히 계산
+        // ---------------------------------------------------------------------
+        event_ready = 1'b0;
+        pulse_sources(
+            {SOURCE_COUNT{1'b1}},
+            EVENT_A, EVENT_B, EVENT_C, EVENT_D
+        );
+        check_u8(pending_count, 8'd16,
+                 "sixteen-source collision setup");
+
+        // Source 0은 같은 클럭에 전달/교체되므로 유실이 아니고,
+        // 아직 Pending인 Source 1~15만 정확히 15회 유실이다.
+        @(negedge clk);
+        event_ready = 1'b1;
+        source_data[0*EVENT_WIDTH +: EVENT_WIDTH] = EVENT_E;
+        source_data[1*EVENT_WIDTH +: EVENT_WIDTH] = EVENT_B;
+        source_data[2*EVENT_WIDTH +: EVENT_WIDTH] = EVENT_C;
+        source_data[3*EVENT_WIDTH +: EVENT_WIDTH] = EVENT_D;
+        source_valid = {SOURCE_COUNT{1'b1}};
+
+        @(negedge clk);
+        source_valid = {SOURCE_COUNT{1'b0}};
+        event_ready = 1'b0;
+        #1;
+        check_bit(event_lost_pulse, 1'b1,
+                  "sixteen-source lost pulse");
+        check_u16(event_lost_count, 16'd15,
+                  "sixteen-source exact lost count");
+        check_u8(pending_count, 8'd16,
+                 "sixteen-source replace preserves count");
 
         // ---------------------------------------------------------------------
         // 결과

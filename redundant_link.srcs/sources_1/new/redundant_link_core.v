@@ -125,8 +125,10 @@ module redundant_link_core #(
     wire        fifo_clear_pulse;
     wire        fifo_pop_request;
 
-    wire datapath_reset_p;
-    assign datapath_reset_p = reset_p | !system_enable;
+    // reset_p만 비동기 Reset으로 사용한다. AXI의 system_enable은 각
+    // 데이터 경로 블록에서 clk에 동기된 Clear로 처리한다.
+    wire datapath_clear;
+    assign datapath_clear = !system_enable;
 
     // -------------------------------------------------------------------------
     // UART RX A/B
@@ -143,7 +145,8 @@ module redundant_link_core #(
         .BAUD_RATE   (BAUD_RATE)
     ) u_uart_rx_a (
         .clk            (clk),
-        .reset_p        (datapath_reset_p),
+        .reset_p        (reset_p),
+        .clear          (datapath_clear),
         .rx             (rs422_rx_a),
         .rx_data        (a_rx_data),
         .rx_valid       (a_rx_valid),
@@ -155,7 +158,8 @@ module redundant_link_core #(
         .BAUD_RATE   (BAUD_RATE)
     ) u_uart_rx_b (
         .clk            (clk),
-        .reset_p        (datapath_reset_p),
+        .reset_p        (reset_p),
+        .clear          (datapath_clear),
         .rx             (rs422_rx_b),
         .rx_data        (b_rx_data),
         .rx_valid       (b_rx_valid),
@@ -198,7 +202,8 @@ module redundant_link_core #(
         .FRAME_TIMEOUT_CLKS     (FRAME_TIMEOUT_CLKS)
     ) u_parser_a (
         .clk               (clk),
-        .reset_p           (datapath_reset_p),
+        .reset_p           (reset_p),
+        .clear             (datapath_clear),
         .rx_data           (a_rx_data),
         .rx_valid          (a_rx_valid),
         .rx_frame_error    (a_uart_frame_error),
@@ -222,7 +227,8 @@ module redundant_link_core #(
         .FRAME_TIMEOUT_CLKS     (FRAME_TIMEOUT_CLKS)
     ) u_parser_b (
         .clk               (clk),
-        .reset_p           (datapath_reset_p),
+        .reset_p           (reset_p),
+        .clear             (datapath_clear),
         .rx_data           (b_rx_data),
         .rx_valid          (b_rx_valid),
         .rx_frame_error    (b_uart_frame_error),
@@ -255,7 +261,8 @@ module redundant_link_core #(
 
     crc16_ccitt u_crc_a (
         .clk            (clk),
-        .reset_p        (datapath_reset_p),
+        .reset_p        (reset_p),
+        .clear          (datapath_clear),
         .crc_data       (a_crc_data),
         .crc_data_valid (a_crc_data_valid),
         .crc_start      (a_crc_start),
@@ -269,7 +276,8 @@ module redundant_link_core #(
 
     crc16_ccitt u_crc_b (
         .clk            (clk),
-        .reset_p        (datapath_reset_p),
+        .reset_p        (reset_p),
+        .clear          (datapath_clear),
         .crc_data       (b_crc_data),
         .crc_data_valid (b_crc_data_valid),
         .crc_start      (b_crc_start),
@@ -294,14 +302,38 @@ module redundant_link_core #(
     reg        b_channel_timeout_pulse;
     reg [7:0]  a_timeout_sequence;
     reg [7:0]  b_timeout_sequence;
+    wire [7:0] a_last_rx_seq;
+    wire [7:0] b_last_rx_seq;
 
     wire [31:0] effective_channel_timeout;
+    wire        a_channel_timeout_fire;
+    wire        b_channel_timeout_fire;
+
     assign effective_channel_timeout =
         (channel_timeout_cycles == 32'd0) ?
         CHANNEL_TIMEOUT_CYCLES : channel_timeout_cycles;
 
-    always @(posedge clk or posedge datapath_reset_p) begin
-        if (datapath_reset_p) begin
+    assign a_channel_timeout_fire =
+        !datapath_clear &&
+        !(a_crc_done && a_crc_ok) &&
+        a_seen_valid && channel_a_alive &&
+        (a_channel_count >= (effective_channel_timeout - 1'b1));
+
+    assign b_channel_timeout_fire =
+        !datapath_clear &&
+        !(b_crc_done && b_crc_ok) &&
+        b_seen_valid && channel_b_alive &&
+        (b_channel_count >= (effective_channel_timeout - 1'b1));
+
+    always @(posedge clk or posedge reset_p) begin
+        if (reset_p) begin
+            channel_a_alive       <= 1'b0;
+            a_seen_valid          <= 1'b0;
+            a_channel_count       <= 32'd0;
+            a_channel_timeout_pulse <= 1'b0;
+            a_timeout_sequence      <= 8'd0;
+        end
+        else if (datapath_clear) begin
             channel_a_alive       <= 1'b0;
             a_seen_valid          <= 1'b0;
             a_channel_count       <= 32'd0;
@@ -316,22 +348,26 @@ module redundant_link_core #(
                 a_seen_valid    <= 1'b1;
                 a_channel_count <= 32'd0;
             end
+            else if (a_channel_timeout_fire) begin
+                channel_a_alive         <= 1'b0;
+                a_channel_timeout_pulse <= 1'b1;
+                a_timeout_sequence      <= a_last_rx_seq;
+            end
             else if (a_seen_valid && channel_a_alive) begin
-                if (a_channel_count >=
-                    (effective_channel_timeout - 1'b1)) begin
-                    channel_a_alive         <= 1'b0;
-                    a_channel_timeout_pulse <= 1'b1;
-                    a_timeout_sequence      <= a_last_rx_seq;
-                end
-                else begin
-                    a_channel_count <= a_channel_count + 1'b1;
-                end
+                a_channel_count <= a_channel_count + 1'b1;
             end
         end
     end
 
-    always @(posedge clk or posedge datapath_reset_p) begin
-        if (datapath_reset_p) begin
+    always @(posedge clk or posedge reset_p) begin
+        if (reset_p) begin
+            channel_b_alive       <= 1'b0;
+            b_seen_valid          <= 1'b0;
+            b_channel_count       <= 32'd0;
+            b_channel_timeout_pulse <= 1'b0;
+            b_timeout_sequence      <= 8'd0;
+        end
+        else if (datapath_clear) begin
             channel_b_alive       <= 1'b0;
             b_seen_valid          <= 1'b0;
             b_channel_count       <= 32'd0;
@@ -346,25 +382,22 @@ module redundant_link_core #(
                 b_seen_valid    <= 1'b1;
                 b_channel_count <= 32'd0;
             end
+            else if (b_channel_timeout_fire) begin
+                channel_b_alive         <= 1'b0;
+                b_channel_timeout_pulse <= 1'b1;
+                b_timeout_sequence      <= b_last_rx_seq;
+            end
             else if (b_seen_valid && channel_b_alive) begin
-                if (b_channel_count >=
-                    (effective_channel_timeout - 1'b1)) begin
-                    channel_b_alive         <= 1'b0;
-                    b_channel_timeout_pulse <= 1'b1;
-                    b_timeout_sequence      <= b_last_rx_seq;
-                end
-                else begin
-                    b_channel_count <= b_channel_count + 1'b1;
-                end
+                b_channel_count <= b_channel_count + 1'b1;
             end
         end
     end
 
     // Timeout 후 해당 채널의 Sequence 기준과 대기 Frame을 비운다.
-    wire a_seq_reset_p;
-    wire b_seq_reset_p;
-    assign a_seq_reset_p = datapath_reset_p | a_channel_timeout_pulse;
-    assign b_seq_reset_p = datapath_reset_p | b_channel_timeout_pulse;
+    wire a_seq_clear;
+    wire b_seq_clear;
+    assign a_seq_clear = datapath_clear | a_channel_timeout_fire;
+    assign b_seq_clear = datapath_clear | b_channel_timeout_fire;
 
     // -------------------------------------------------------------------------
     // Sequence Monitor A/B
@@ -374,19 +407,18 @@ module redundant_link_core #(
     wire       a_seq_duplicate;
     wire       a_seq_gap;
     wire       a_seq_old;
-    wire [7:0] a_last_rx_seq;
     wire       a_seq_initialized;
     wire       b_seq_accept;
     wire       b_seq_ok;
     wire       b_seq_duplicate;
     wire       b_seq_gap;
     wire       b_seq_old;
-    wire [7:0] b_last_rx_seq;
     wire       b_seq_initialized;
 
     seq_monitor u_seq_a (
         .clk             (clk),
-        .reset_p         (a_seq_reset_p),
+        .reset_p         (reset_p),
+        .clear           (a_seq_clear),
         .seq_valid       (a_crc_done && a_crc_ok),
         .seq_value       (a_sequence),
         .seq_accept      (a_seq_accept),
@@ -400,7 +432,8 @@ module redundant_link_core #(
 
     seq_monitor u_seq_b (
         .clk             (clk),
-        .reset_p         (b_seq_reset_p),
+        .reset_p         (reset_p),
+        .clear           (b_seq_clear),
         .seq_valid       (b_crc_done && b_crc_ok),
         .seq_value       (b_sequence),
         .seq_accept      (b_seq_accept),
@@ -443,7 +476,8 @@ module redundant_link_core #(
 
     frame_fifo u_fifo_a (
         .clk              (clk),
-        .reset_p          (a_seq_reset_p),
+        .reset_p          (reset_p),
+        .clear            (a_seq_clear),
         .push             (a_seq_accept),
         .in_frame_length  (a_frame_length),
         .in_device_id     (a_device_id),
@@ -468,7 +502,8 @@ module redundant_link_core #(
 
     frame_fifo u_fifo_b (
         .clk              (clk),
-        .reset_p          (b_seq_reset_p),
+        .reset_p          (reset_p),
+        .clear            (b_seq_clear),
         .push             (b_seq_accept),
         .in_frame_length  (b_frame_length),
         .in_device_id     (b_device_id),
@@ -514,7 +549,8 @@ module redundant_link_core #(
         .PAIR_TIMEOUT_CYCLES (PAIR_TIMEOUT_CYCLES)
     ) u_pair_matcher (
         .clk                  (clk),
-        .reset_p              (datapath_reset_p),
+        .reset_p              (reset_p),
+        .clear                (datapath_clear),
         .pair_timeout_cycles  (pair_wait_timeout_cycles),
         .a_empty              (a_fifo_empty),
         .a_frame_length       (a_fifo_length),
@@ -580,7 +616,8 @@ module redundant_link_core #(
 
     channel_health_mgr u_health (
         .clk                  (clk),
-        .reset_p              (datapath_reset_p),
+        .reset_p              (reset_p),
+        .clear                (datapath_clear),
         .matcher_result_valid (matcher_result_valid),
         .matcher_result_kind  (matcher_result_kind),
         .matcher_pair_equal   (matcher_pair_equal),
@@ -624,7 +661,7 @@ module redundant_link_core #(
 
     decision_unit u_decision (
         .clk                    (clk),
-        .reset_p                (datapath_reset_p),
+        .reset_p                (reset_p),
         .system_enable          (system_enable),
         .preferred_channel_b    (preferred_channel_b),
         .channel_a_usable       (channel_a_usable),
@@ -697,7 +734,8 @@ module redundant_link_core #(
         .HISTORY_DEPTH (HISTORY_DEPTH)
     ) u_duplicate_guard (
         .clk              (clk),
-        .reset_p          (datapath_reset_p),
+        .reset_p          (reset_p),
+        .clear            (datapath_clear),
         .decision_valid   (decision_valid),
         .decision_accept  (guard_accept),
         .statistics_clear (statistics_clear_pulse),
@@ -780,8 +818,22 @@ module redundant_link_core #(
 
     assign translated_frame_fire = translation_valid && raw_in_ready;
 
-    always @(posedge clk or posedge datapath_reset_p) begin
-        if (datapath_reset_p) begin
+    always @(posedge clk or posedge reset_p) begin
+        if (reset_p) begin
+            translation_reserved   <= 1'b0;
+            translation_crc_active <= 1'b0;
+            translation_valid      <= 1'b0;
+            translation_byte_index <= 6'd0;
+            translation_crc_reg    <= 16'hFFFF;
+            translation_length     <= 8'd0;
+            translation_device_id  <= 8'd0;
+            translation_command    <= 8'd0;
+            translation_sequence   <= 8'd0;
+            translation_payload    <= 128'd0;
+            translation_seq_gap    <= 1'b0;
+            translation_selected_b <= 1'b0;
+        end
+        else if (datapath_clear) begin
             translation_reserved   <= 1'b0;
             translation_crc_active <= 1'b0;
             translation_valid      <= 1'b0;
@@ -861,7 +913,8 @@ module redundant_link_core #(
 
     raw_frame_buffer u_raw_buffer (
         .clk                 (clk),
-        .reset_p             (datapath_reset_p),
+        .reset_p             (reset_p),
+        .clear               (datapath_clear),
         .statistics_clear    (statistics_clear_pulse),
         .in_valid            (translation_valid),
         .in_ready            (raw_in_ready),
@@ -890,7 +943,8 @@ module redundant_link_core #(
         .BAUD_RATE   (BAUD_RATE)
     ) u_uart_tx (
         .clk      (clk),
-        .reset_p  (datapath_reset_p),
+        .reset_p  (reset_p),
+        .clear    (datapath_clear),
         .tx_valid (raw_tx_valid),
         .tx_ready (raw_tx_ready),
         .tx_data  (raw_tx_data),
@@ -908,8 +962,15 @@ module redundant_link_core #(
     reg failover_b_to_a_pulse;
     reg recovery_default_pulse;
 
-    always @(posedge clk or posedge datapath_reset_p) begin
-        if (datapath_reset_p) begin
+    always @(posedge clk or posedge reset_p) begin
+        if (reset_p) begin
+            last_selected_b          <= 1'b0;
+            selection_initialized    <= 1'b0;
+            failover_a_to_b_pulse    <= 1'b0;
+            failover_b_to_a_pulse    <= 1'b0;
+            recovery_default_pulse   <= 1'b0;
+        end
+        else if (datapath_clear) begin
             last_selected_b          <= 1'b0;
             selection_initialized    <= 1'b0;
             failover_a_to_b_pulse    <= 1'b0;
@@ -1374,7 +1435,9 @@ module redundant_link_core #(
         .irq                     (irq),
         .output_frame_valid      (translated_frame_fire),
         .output_sequence         (translation_sequence),
-        .last_selected_b         (last_selected_b),
+        // 같은 Frame의 valid와 선택 채널을 함께 전달해 FND가 이전
+        // Frame의 채널을 저장하지 않도록 한다.
+        .last_selected_b         (translation_selected_b),
         .duplicate_drop_pulse    (duplicate_drop),
         .led                     (led),
         .seg                     (seg),

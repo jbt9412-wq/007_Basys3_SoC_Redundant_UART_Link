@@ -30,6 +30,7 @@ module channel_health_mgr #(
 )(
     input  wire       clk,
     input  wire       reset_p,
+    input  wire       clear,
 
     // pair_matcher 결과
     input  wire       matcher_result_valid,
@@ -39,6 +40,10 @@ module channel_health_mgr #(
     // pair_matcher 외부에서 발생한 채널별 오류 Pulse
     input  wire       a_local_fail_event,
     input  wire       b_local_fail_event,
+
+    // AXI-Lite에서 설정하는 런타임 임계값. 0은 Parameter 기본값을 쓴다.
+    input  wire [7:0] fail_threshold_cfg,
+    input  wire [7:0] recover_threshold_cfg,
 
     // decision_unit과 AXI Status에서 사용할 상태
     output reg        a_fault,
@@ -60,21 +65,44 @@ module channel_health_mgr #(
     localparam [1:0] RESULT_SINGLE_A = 2'b10;
     localparam [1:0] RESULT_SINGLE_B = 2'b11;
 
+    wire [7:0] effective_fail_threshold;
+    wire [7:0] effective_recover_threshold;
+
+    assign effective_fail_threshold =
+        (fail_threshold_cfg == 8'd0) ?
+        FAIL_THRESHOLD[7:0] : fail_threshold_cfg;
+    assign effective_recover_threshold =
+        (recover_threshold_cfg == 8'd0) ?
+        RECOVER_THRESHOLD[7:0] : recover_threshold_cfg;
+
     // 이번 matcher 결과가 각 채널에 대해 Good인지 Fail인지 나타낸다.
     reg a_good_event;
     reg b_good_event;
     reg a_bad_event;
     reg b_bad_event;
-    reg a_recovery_match_event;
-    reg b_recovery_match_event;
+    wire a_recovery_match_event;
+    wire b_recovery_match_event;
+
+    // Fault 복구는 "동일 Pair + 내용 일치"일 때만 누적한다.
+    // 조합 always 블록 안에서 쓰고 다시 읽는 임시 reg를 피하여
+    // 시뮬레이션 delta-cycle에 관계없이 확정된 값을 순차부에 전달한다.
+    assign a_recovery_match_event =
+        matcher_result_valid &&
+        (matcher_result_kind == RESULT_PAIR) &&
+        matcher_pair_equal &&
+        !a_local_fail_event;
+
+    assign b_recovery_match_event =
+        matcher_result_valid &&
+        (matcher_result_kind == RESULT_PAIR) &&
+        matcher_pair_equal &&
+        !b_local_fail_event;
 
     always @(*) begin
         a_good_event = 1'b0;
         b_good_event = 1'b0;
         a_bad_event  = a_local_fail_event;
         b_bad_event  = b_local_fail_event;
-        a_recovery_match_event = 1'b0;
-        b_recovery_match_event = 1'b0;
 
         if (matcher_result_valid) begin
             case (matcher_result_kind)
@@ -82,8 +110,6 @@ module channel_health_mgr #(
                     if (matcher_pair_equal) begin
                         a_good_event = 1'b1;
                         b_good_event = 1'b1;
-                        a_recovery_match_event = 1'b1;
-                        b_recovery_match_event = 1'b1;
                     end
                     else begin
                         // 어느 채널의 데이터가 틀렸는지 특정할 수 없다.
@@ -120,12 +146,6 @@ module channel_health_mgr #(
 
         if (b_bad_event)
             b_good_event = 1'b0;
-
-        if (a_bad_event)
-            a_recovery_match_event = 1'b0;
-
-        if (b_bad_event)
-            b_recovery_match_event = 1'b0;
     end
 
     // -------------------------------------------------------------------------
@@ -133,6 +153,13 @@ module channel_health_mgr #(
     // -------------------------------------------------------------------------
     always @(posedge clk or posedge reset_p) begin
         if (reset_p) begin
+            a_fault             <= 1'b0;
+            a_fail_count        <= 8'd0;
+            a_recover_count     <= 8'd0;
+            a_fault_enter_pulse <= 1'b0;
+            a_recovered_pulse   <= 1'b0;
+        end
+        else if (clear) begin
             a_fault             <= 1'b0;
             a_fail_count        <= 8'd0;
             a_recover_count     <= 8'd0;
@@ -148,10 +175,10 @@ module channel_health_mgr #(
                 a_recover_count <= 8'd0;
 
                 if (!a_fault) begin
-                    if ((FAIL_THRESHOLD <= 1) ||
-                        (a_fail_count >= (FAIL_THRESHOLD - 1))) begin
+                    if (a_fail_count >=
+                        (effective_fail_threshold - 1'b1)) begin
                         a_fault             <= 1'b1;
-                        a_fail_count        <= FAIL_THRESHOLD;
+                        a_fail_count        <= effective_fail_threshold;
                         a_fault_enter_pulse <= 1'b1;
                     end
                     else begin
@@ -162,8 +189,8 @@ module channel_health_mgr #(
             else if (a_fault) begin
                 if (a_recovery_match_event) begin
                     // Fault 채널은 정상 Pair가 연속 5회 들어와야 복구한다.
-                    if ((RECOVER_THRESHOLD <= 1) ||
-                        (a_recover_count >= (RECOVER_THRESHOLD - 1))) begin
+                    if (a_recover_count >=
+                        (effective_recover_threshold - 1'b1)) begin
                         a_fault           <= 1'b0;
                         a_fail_count      <= 8'd0;
                         a_recover_count   <= 8'd0;
@@ -197,6 +224,13 @@ module channel_health_mgr #(
             b_fault_enter_pulse <= 1'b0;
             b_recovered_pulse   <= 1'b0;
         end
+        else if (clear) begin
+            b_fault             <= 1'b0;
+            b_fail_count        <= 8'd0;
+            b_recover_count     <= 8'd0;
+            b_fault_enter_pulse <= 1'b0;
+            b_recovered_pulse   <= 1'b0;
+        end
         else begin
             b_fault_enter_pulse <= 1'b0;
             b_recovered_pulse   <= 1'b0;
@@ -206,10 +240,10 @@ module channel_health_mgr #(
                 b_recover_count <= 8'd0;
 
                 if (!b_fault) begin
-                    if ((FAIL_THRESHOLD <= 1) ||
-                        (b_fail_count >= (FAIL_THRESHOLD - 1))) begin
+                    if (b_fail_count >=
+                        (effective_fail_threshold - 1'b1)) begin
                         b_fault             <= 1'b1;
-                        b_fail_count        <= FAIL_THRESHOLD;
+                        b_fail_count        <= effective_fail_threshold;
                         b_fault_enter_pulse <= 1'b1;
                     end
                     else begin
@@ -220,8 +254,8 @@ module channel_health_mgr #(
             else if (b_fault) begin
                 if (b_recovery_match_event) begin
                     // Fault 채널은 정상 Pair가 연속 5회 들어와야 복구한다.
-                    if ((RECOVER_THRESHOLD <= 1) ||
-                        (b_recover_count >= (RECOVER_THRESHOLD - 1))) begin
+                    if (b_recover_count >=
+                        (effective_recover_threshold - 1'b1)) begin
                         b_fault           <= 1'b0;
                         b_fail_count      <= 8'd0;
                         b_recover_count   <= 8'd0;

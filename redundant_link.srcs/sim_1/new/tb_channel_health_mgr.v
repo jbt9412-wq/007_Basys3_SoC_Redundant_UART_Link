@@ -18,6 +18,7 @@ module tb_channel_health_mgr;
 
     reg       clk;
     reg       reset_p;
+    reg       clear;
 
     reg       matcher_result_valid;
     reg [1:0] matcher_result_kind;
@@ -25,6 +26,8 @@ module tb_channel_health_mgr;
 
     reg       a_local_fail_event;
     reg       b_local_fail_event;
+    reg [7:0] fail_threshold_cfg;
+    reg [7:0] recover_threshold_cfg;
 
     wire       a_fault;
     wire       b_fault;
@@ -46,6 +49,7 @@ module tb_channel_health_mgr;
     ) dut (
         .clk                  (clk),
         .reset_p              (reset_p),
+        .clear                (clear),
 
         .matcher_result_valid (matcher_result_valid),
         .matcher_result_kind  (matcher_result_kind),
@@ -53,6 +57,8 @@ module tb_channel_health_mgr;
 
         .a_local_fail_event   (a_local_fail_event),
         .b_local_fail_event   (b_local_fail_event),
+        .fail_threshold_cfg   (fail_threshold_cfg),
+        .recover_threshold_cfg(recover_threshold_cfg),
 
         .a_fault              (a_fault),
         .b_fault              (b_fault),
@@ -145,6 +151,7 @@ module tb_channel_health_mgr;
 
     task apply_reset;
         begin
+            clear   = 1'b0;
             reset_p = 1'b1;
             repeat (2) @(negedge clk);
             reset_p = 1'b0;
@@ -154,11 +161,14 @@ module tb_channel_health_mgr;
 
     initial begin
         reset_p               = 1'b1;
+        clear                 = 1'b0;
         matcher_result_valid  = 1'b0;
         matcher_result_kind   = NONE;
         matcher_pair_equal    = 1'b0;
         a_local_fail_event    = 1'b0;
         b_local_fail_event    = 1'b0;
+        fail_threshold_cfg    = 8'd3;
+        recover_threshold_cfg = 8'd5;
         error_count           = 0;
         test_index            = 0;
 
@@ -245,8 +255,63 @@ module tb_channel_health_mgr;
             1'b1, 1'b0, 1'b0, 1'b0
         );
 
+        // ---------------------------------------------------------------------
+        // 6. AXI runtime threshold values override the parameter defaults.
+        // ---------------------------------------------------------------------
+        apply_reset;
+        fail_threshold_cfg    = 8'd2;
+        recover_threshold_cfg = 8'd2;
+
+        send_local_fail(1'b1, 1'b0);
+        send_local_fail(1'b1, 1'b0);
+        check_state(
+            1'b1, 1'b0, 8'd2, 8'd0, 8'd0, 8'd0,
+            1'b1, 1'b0, 1'b0, 1'b0
+        );
+
+        send_matcher_result(PAIR, 1'b1);
+        check_state(
+            1'b1, 1'b0, 8'd2, 8'd0, 8'd1, 8'd0,
+            1'b0, 1'b0, 1'b0, 1'b0
+        );
+
+        send_matcher_result(PAIR, 1'b1);
+        check_state(
+            1'b0, 1'b0, 8'd0, 8'd0, 8'd0, 8'd0,
+            1'b0, 1'b0, 1'b1, 1'b0
+        );
+
+        // ---------------------------------------------------------------------
+        // 7. clear is synchronous: state changes only on the next clock edge.
+        // ---------------------------------------------------------------------
+        apply_reset;
+        fail_threshold_cfg    = 8'd3;
+        recover_threshold_cfg = 8'd5;
+        send_local_fail(1'b1, 1'b0);
+        check_state(
+            1'b0, 1'b0, 8'd1, 8'd0, 8'd0, 8'd0,
+            1'b0, 1'b0, 1'b0, 1'b0
+        );
+
+        @(negedge clk);
+        clear = 1'b1;
+        #1;
+        if (a_fail_count !== 8'd1) begin
+            error_count = error_count + 1;
+            $display("[FAIL] clear acted asynchronously at time=%0t", $time);
+        end
+
+        @(posedge clk);
+        #1;
+        check_state(
+            1'b0, 1'b0, 8'd0, 8'd0, 8'd0, 8'd0,
+            1'b0, 1'b0, 1'b0, 1'b0
+        );
+        @(negedge clk);
+        clear = 1'b0;
+
         if (error_count == 0)
-            $display("[PASS] All channel_health_mgr core tests passed.");
+            $display("[PASS] All channel_health_mgr final-interface tests passed.");
         else
             $display("[FAIL] error_count=%0d", error_count);
 
