@@ -18,7 +18,7 @@
 //   1. 0xA5, 0x5A를 차례대로 찾는다.
 //   2. LEN이 3~19인지 검사한다.
 //   3. 헤더와 Payload를 순서대로 저장한다.
-//   4. CRC High/Low를 저장한 뒤 frame_complete를 1클럭 출력한다.
+//   4. CRC High/Low를 저장한 뒤 packet_valid를 1클럭 출력한다.
 //   5. UART Framing Error, Length Error, Timeout이면 현재 프레임을 버린다.
 //
 // CRC 경계
@@ -38,6 +38,7 @@ module frame_parser #(
 )(
     input  wire         clk,
     input  wire         reset_p,
+    input  wire         clear,
 
     // uart_rx와 연결되는 입력
     input  wire [7:0]   rx_data,
@@ -51,7 +52,7 @@ module frame_parser #(
     output reg  [7:0]   sequence,
     output reg  [127:0] payload_data,
     output reg  [15:0]  received_crc,
-    output reg          frame_complete,
+    output reg          packet_valid,
 
     // crc16_ccitt 모듈로 전달할 바이트 스트림
     output reg  [7:0]   crc_data,
@@ -99,7 +100,7 @@ module frame_parser #(
     // Parser FSM, 필드 저장, Timeout 처리
     // -------------------------------------------------------------------------
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p) begin
+        if (reset_p || clear) begin
             state              <= ST_WAIT_SYNC1;
             payload_remaining  <= 5'd0;
             interbyte_count    <= {INTERBYTE_CNT_WIDTH{1'b0}};
@@ -112,7 +113,7 @@ module frame_parser #(
             payload_data       <= 128'd0;
             received_crc       <= 16'd0;
 
-            frame_complete       <= 1'b0;
+            packet_valid       <= 1'b0;
             crc_data           <= 8'd0;
             crc_data_valid     <= 1'b0;
             crc_start          <= 1'b0;
@@ -122,7 +123,7 @@ module frame_parser #(
         end
         else begin
             // 아래 신호들은 사건을 알리는 1클럭 펄스이다.
-            frame_complete      <= 1'b0;
+            packet_valid      <= 1'b0;
             crc_data_valid    <= 1'b0;
             crc_start         <= 1'b0;
             length_error      <= 1'b0;
@@ -299,7 +300,7 @@ module frame_parser #(
                         // -----------------------------------------------------
                         ST_READ_CRC_L: begin
                             received_crc[7:0] <= rx_data;
-                            frame_complete      <= 1'b1;
+                            packet_valid      <= 1'b1;
 
                             // 다음 프레임의 SYNC1을 다시 찾는다.
                             state             <= ST_WAIT_SYNC1;

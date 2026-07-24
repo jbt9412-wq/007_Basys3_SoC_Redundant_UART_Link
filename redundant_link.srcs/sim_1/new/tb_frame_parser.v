@@ -6,6 +6,7 @@ module tb_frame_parser;
 
     reg         clk;
     reg         reset_p;
+    reg         clear;
     reg  [7:0]  rx_data;
     reg         rx_valid;
     reg         rx_frame_error;
@@ -16,7 +17,7 @@ module tb_frame_parser;
     wire [7:0]   sequence;
     wire [127:0] payload_data;
     wire [15:0]  received_crc;
-    wire         frame_complete;
+    wire         packet_valid;
 
     wire [7:0] crc_data;
     wire       crc_data_valid;
@@ -39,6 +40,7 @@ module tb_frame_parser;
     ) dut (
         .clk               (clk),
         .reset_p           (reset_p),
+        .clear             (clear),
         .rx_data           (rx_data),
         .rx_valid          (rx_valid),
         .rx_frame_error    (rx_frame_error),
@@ -49,7 +51,7 @@ module tb_frame_parser;
         .sequence          (sequence),
         .payload_data      (payload_data),
         .received_crc      (received_crc),
-        .frame_complete      (frame_complete),
+        .packet_valid       (packet_valid),
 
         .crc_data          (crc_data),
         .crc_data_valid    (crc_data_valid),
@@ -98,6 +100,7 @@ module tb_frame_parser;
 
     initial begin
         reset_p                = 1'b1;
+        clear                  = 1'b0;
         rx_data                = 8'h00;
         rx_valid               = 1'b0;
         rx_frame_error         = 1'b0;
@@ -124,23 +127,23 @@ module tb_frame_parser;
         send_byte(8'h12);
         send_byte(8'h34);
 
-        if ((frame_complete       == 1'b1)       &&
+        if ((packet_valid      == 1'b1)       &&
             (frame_length      == 8'h05)       &&
             (device_id         == 8'h11)       &&
             (command           == 8'h22)       &&
             (sequence          == 8'h07)       &&
             (payload_data      == 128'h0000000000000000000000000000DEAD) &&
             (received_crc      == 16'h1234))
-            $display("[PASS] 필드 조립과 frame_complete 정상");
+            $display("[PASS] 필드 조립과 packet_valid 정상");
         else
             $display("[FAIL] 정상 프레임 조립 결과 확인 필요");
 
-        // frame_complete가 한 클럭 펄스인지 확인
+        // packet_valid가 한 클럭 펄스인지 확인
         @(negedge clk);
-        if (frame_complete == 1'b0)
-            $display("[PASS] frame_complete 1클럭 펄스 정상");
+        if (packet_valid == 1'b0)
+            $display("[PASS] packet_valid 1클럭 펄스 정상");
         else
-            $display("[FAIL] frame_complete가 1클럭보다 김");
+            $display("[FAIL] packet_valid가 1클럭보다 김");
 
         // ---------------------------------------------------------------------
         // TEST 2: 잘못된 LEN 폐기 후 A5 A5 5A 재동기화
@@ -151,7 +154,7 @@ module tb_frame_parser;
         send_byte(8'h5A);
         send_byte(8'h02);
 
-        if ((length_error == 1'b1) && (frame_complete == 1'b0))
+        if ((length_error == 1'b1) && (packet_valid == 1'b0))
             $display("[PASS] LEN=2 검출 후 프레임 폐기");
         else
             $display("[FAIL] Length Error 처리 확인 필요");
@@ -167,7 +170,7 @@ module tb_frame_parser;
         send_byte(8'hBE); // CRC High
         send_byte(8'hEF); // CRC Low
 
-        if ((frame_complete  == 1'b1)  &&
+        if ((packet_valid == 1'b1)  &&
             (frame_length == 8'h03)  &&
             (device_id    == 8'h44)  &&
             (command      == 8'h55)  &&
@@ -202,7 +205,7 @@ module tb_frame_parser;
         send_byte(8'h61);
         send_byte(8'h71);
 
-        if ((frame_complete == 1'b0) && (dut.state == 4'd0))
+        if ((packet_valid == 1'b0) && (dut.state == 4'd0))
             $display("[PASS] 진행 중 프레임 폐기 후 WAIT_SYNC1 복귀");
         else
             $display("[FAIL] UART Framing Error 복귀 상태 확인 필요");
@@ -233,7 +236,7 @@ module tb_frame_parser;
         send_byte(8'hCA);
         send_byte(8'hFE);
 
-        if ((frame_complete  == 1'b1) &&
+        if ((packet_valid == 1'b1) &&
             (device_id    == 8'hAA) &&
             (command      == 8'h10) &&
             (sequence     == 8'h01) &&
@@ -278,7 +281,7 @@ module tb_frame_parser;
         else
             $display("[FAIL] Frame Timeout 처리 확인 필요");
 
-        $display("\n테스트 종료 - Waveform에서는 state, rx_valid, frame_complete,");
+        $display("\n테스트 종료 - Waveform에서는 state, rx_valid, packet_valid,");
         $display("length_error, interbyte_timeout, frame_timeout, crc_start를 함께 확인하세요.");
         $finish;
     end

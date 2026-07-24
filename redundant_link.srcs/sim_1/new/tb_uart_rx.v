@@ -10,6 +10,7 @@ module tb_uart_rx;
 
     reg        clk;
     reg        reset_p;
+    reg        clear;
     reg        rx;
     wire [7:0] rx_data;
     wire       rx_valid;
@@ -29,6 +30,7 @@ module tb_uart_rx;
     ) dut (
         .clk           (clk),
         .reset_p       (reset_p),
+        .clear         (clear),
         .rx            (rx),
         .rx_data       (rx_data),
         .rx_valid      (rx_valid),
@@ -164,6 +166,7 @@ module tb_uart_rx;
         prev_rx_valid     = 1'b0;
         prev_frame_error  = 1'b0;
         reset_p           = 1'b1;
+        clear             = 1'b0;
         rx                = 1'b1;
 
         repeat (5) @(negedge clk);

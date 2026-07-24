@@ -32,6 +32,7 @@
 module crc16_ccitt (
     input  wire        clk,
     input  wire        reset_p,
+    input  wire        clear,
 
     // frame_parser가 LEN~PAYLOAD를 전달하는 스트리밍 입력
     input  wire [7:0]  crc_data,
@@ -89,6 +90,12 @@ module crc16_ccitt (
             crc_done       <= 1'b0;
             crc_ok         <= 1'b0;
             crc_error      <= 1'b0;
+        end
+        else if (clear) begin
+            calculated_crc <= 16'hFFFF;
+            crc_done      <= 1'b0;
+            crc_ok        <= 1'b0;
+            crc_error     <= 1'b0;
         end
         else begin
             // 아래 세 신호는 판정이 끝난 순간만 알리는 1클럭 펄스이다.

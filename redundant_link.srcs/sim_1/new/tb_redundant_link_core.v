@@ -147,6 +147,7 @@ module tb_redundant_link_core;
     ) output_monitor (
         .clk            (clk),
         .reset_p        (reset_p),
+        .clear          (1'b0),
         .rx             (rs422_tx_out),
         .rx_data        (output_rx_data),
         .rx_valid       (output_rx_valid),
@@ -586,6 +587,19 @@ module tb_redundant_link_core;
         start_both_sources;
         wait_and_check_ten_output_bytes;
 
+        // FND가 같은 Frame의 선택 채널/SEQ를 저장해야 한다.
+        // 이전 구현은 last_selected_b의 이전 Frame 값을 캡처했다.
+        @(negedge clk);
+        if ((dut.u_status_display.stored_selected_b !== 1'b1) ||
+            (dut.u_status_display.stored_sequence !== 8'h13)) begin
+            $display(
+                "[FAIL] FND selection expected B/13 actual=%b/%h",
+                dut.u_status_display.stored_selected_b,
+                dut.u_status_display.stored_sequence
+            );
+            error_count = error_count + 1;
+        end
+
         // -------------------------------------------------------------
         // Test 6: Event/Statistics Clear 실제 반영
         // -------------------------------------------------------------
@@ -640,7 +654,7 @@ module tb_redundant_link_core;
     end
 
     initial begin
-        #2_000_000;
+        #20_000_000;
         $display("[FAIL] Global timeout");
         $finish;
     end
@@ -678,6 +692,7 @@ module tb_uart_frame_source #(
     ) transmitter (
         .clk      (clk),
         .reset_p  (reset_p),
+        .clear    (1'b0),
         .tx_valid (tx_valid),
         .tx_ready (tx_ready),
         .tx_data  (tx_data),

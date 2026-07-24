@@ -26,6 +26,7 @@ module tb_uart_tx;
 
     reg        clk;
     reg        reset_p;
+    reg        clear;
     reg        tx_valid;
     wire       tx_ready;
     reg  [7:0] tx_data;
@@ -47,6 +48,7 @@ module tb_uart_tx;
     ) dut (
         .clk      (clk),
         .reset_p  (reset_p),
+        .clear    (clear),
         .tx_valid (tx_valid),
         .tx_ready (tx_ready),
         .tx_data  (tx_data),
@@ -214,6 +216,7 @@ module tb_uart_tx;
 
     initial begin
         reset_p       = 1'b1;
+        clear         = 1'b0;
         tx_valid      = 1'b0;
         tx_data       = 8'd0;
         error_count   = 0;

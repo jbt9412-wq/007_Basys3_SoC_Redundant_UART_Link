@@ -26,10 +26,12 @@ module duplicate_guard #(
 )(
     input  wire         clk,
     input  wire         reset_p,
+    input  wire         clear,
 
     // decision_unit 출력
     input  wire         decision_valid,
     input  wire         decision_accept,
+    input  wire         statistics_clear,
 
     input  wire [7:0]   in_frame_length,
     input  wire [7:0]   in_device_id,
@@ -38,6 +40,7 @@ module duplicate_guard #(
     input  wire [127:0] in_payload_data,
     input  wire [15:0]  in_received_crc,
     input  wire         in_seq_gap,
+    input  wire         in_selected_b,
 
     // uart_tx로 전달할 프레임
     output reg          out_valid,
@@ -48,6 +51,7 @@ module duplicate_guard #(
     output reg  [127:0] out_payload_data,
     output reg  [15:0]  out_received_crc,
     output reg          out_seq_gap,
+    output reg          out_selected_b,
 
     // 상태/통계
     output reg          duplicate_drop,
@@ -81,7 +85,7 @@ module duplicate_guard #(
     end
 
     always @(posedge clk or posedge reset_p) begin
-        if (reset_p) begin
+        if (reset_p || clear) begin
             out_valid          <= 1'b0;
             out_frame_length   <= 8'd0;
             out_device_id      <= 8'd0;
@@ -90,6 +94,7 @@ module duplicate_guard #(
             out_payload_data   <= 128'd0;
             out_received_crc   <= 16'd0;
             out_seq_gap        <= 1'b0;
+            out_selected_b     <= 1'b0;
 
             duplicate_drop     <= 1'b0;
             duplicate_count    <= 16'd0;
@@ -107,13 +112,28 @@ module duplicate_guard #(
             out_valid      <= 1'b0;
             duplicate_drop <= 1'b0;
 
+            if (statistics_clear)
+                duplicate_count <= 16'd0;
+
             if (decision_valid && decision_accept) begin
                 if (duplicate_hit) begin
                     // 이미 출력한 프레임이므로 UART 쪽으로 전달하지 않는다.
                     duplicate_drop <= 1'b1;
 
+                    // out_valid는 0이지만 Event Log가 어떤 Frame을 차단했는지
+                    // 기록할 수 있도록 현재 중복 Frame의 Metadata를 보존한다.
+                    out_frame_length <= in_frame_length;
+                    out_device_id    <= in_device_id;
+                    out_command      <= in_command;
+                    out_sequence     <= in_sequence;
+                    out_payload_data <= in_payload_data;
+                    out_received_crc <= in_received_crc;
+                    out_seq_gap      <= in_seq_gap;
+                    out_selected_b   <= in_selected_b;
+
                     // 통계 카운터는 최대값에서 포화시킨다.
-                    if (duplicate_count != 16'hFFFF)
+                    if (!statistics_clear &&
+                        (duplicate_count != 16'hFFFF))
                         duplicate_count <= duplicate_count + 1'b1;
                 end
                 else begin
@@ -126,6 +146,7 @@ module duplicate_guard #(
                     out_payload_data <= in_payload_data;
                     out_received_crc <= in_received_crc;
                     out_seq_gap      <= in_seq_gap;
+                    out_selected_b   <= in_selected_b;
 
                     // 가장 오래된 이력을 제거하고 새 이력을 0번에 넣는다.
                     for (shift_index = HISTORY_DEPTH - 1;

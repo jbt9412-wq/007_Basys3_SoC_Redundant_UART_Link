@@ -19,6 +19,7 @@ module tb_crc16_ccitt;
 
     reg         clk;
     reg         reset_p;
+    reg         clear;
     reg  [7:0]  crc_data;
     reg         crc_data_valid;
     reg         crc_start;
@@ -36,6 +37,7 @@ module tb_crc16_ccitt;
     crc16_ccitt dut (
         .clk            (clk),
         .reset_p        (reset_p),
+        .clear          (clear),
         .crc_data       (crc_data),
         .crc_data_valid (crc_data_valid),
         .crc_start      (crc_start),
@@ -142,6 +144,7 @@ module tb_crc16_ccitt;
 
     initial begin
         reset_p        = 1'b1;
+        clear          = 1'b0;
         crc_data       = 8'h00;
         crc_data_valid = 1'b0;
         crc_start      = 1'b0;
