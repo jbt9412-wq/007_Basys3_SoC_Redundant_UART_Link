@@ -1,0 +1,26 @@
+# Vivado generated directories
+.Xil/
+*.cache/
+*.gen/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+xsim.dir/
+
+# Vivado generated files
+*.jou
+*.log
+*.str
+*.wdb
+*.wcfg
+*.pb
+*.dcp
+*.bit
+*.bin
+*.ltx
+
+# Editor/OS files
+*~
+*.swp
+.DS_Store

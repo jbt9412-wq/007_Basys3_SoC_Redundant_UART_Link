@@ -1,0 +1,247 @@
+`timescale 1ns / 1ps
+
+// -----------------------------------------------------------------------------
+// channel_health_mgr
+//
+// 역할
+//   1. pair_matcher 결과를 A/B 채널의 Good/Fail 사건으로 변환한다.
+//   2. 정상 채널은 연속 Fail 3회에서 Fault로 전환한다.
+//   3. Fault 채널은 정상 Pair 5회에서 Healthy로 복구한다.
+//
+// matcher_result_kind
+//   2'b00 : 결과 없음
+//   2'b01 : Pair
+//   2'b10 : Single A  -> A 정상, B 누락
+//   2'b11 : Single B  -> A 누락, B 정상
+//
+// local_fail_event
+//   CRC 오류, SEQ 오류, FIFO Overflow, 300ms Channel Timeout처럼
+//   pair_matcher 밖에서 검출한 채널별 오류를 1클럭 Pulse로 입력한다.
+//   같은 논리적 오류를 중복 Pulse로 넣지 않아야 한다.
+//
+// 중요
+//   WAIT_SYNC/DUAL/SINGLE_A/SINGLE_B/BOTH_FAULT 상태와 출력 선택은
+//   다음 단계인 decision_unit에서 관리한다.
+// -----------------------------------------------------------------------------
+
+module channel_health_mgr #(
+    parameter integer FAIL_THRESHOLD    = 3,
+    parameter integer RECOVER_THRESHOLD = 5
+)(
+    input  wire       clk,
+    input  wire       reset_p,
+
+    // pair_matcher 결과
+    input  wire       matcher_result_valid,
+    input  wire [1:0] matcher_result_kind,
+    input  wire       matcher_pair_equal,
+
+    // pair_matcher 외부에서 발생한 채널별 오류 Pulse
+    input  wire       a_local_fail_event,
+    input  wire       b_local_fail_event,
+
+    // decision_unit과 AXI Status에서 사용할 상태
+    output reg        a_fault,
+    output reg        b_fault,
+    output reg  [7:0] a_fail_count,
+    output reg  [7:0] b_fail_count,
+    output reg  [7:0] a_recover_count,
+    output reg  [7:0] b_recover_count,
+
+    // 상태가 바뀌는 순간에만 1클럭 Pulse
+    output reg        a_fault_enter_pulse,
+    output reg        b_fault_enter_pulse,
+    output reg        a_recovered_pulse,
+    output reg        b_recovered_pulse
+);
+
+    localparam [1:0] RESULT_NONE     = 2'b00;
+    localparam [1:0] RESULT_PAIR     = 2'b01;
+    localparam [1:0] RESULT_SINGLE_A = 2'b10;
+    localparam [1:0] RESULT_SINGLE_B = 2'b11;
+
+    // 이번 matcher 결과가 각 채널에 대해 Good인지 Fail인지 나타낸다.
+    reg a_good_event;
+    reg b_good_event;
+    reg a_bad_event;
+    reg b_bad_event;
+    reg a_recovery_match_event;
+    reg b_recovery_match_event;
+
+    always @(*) begin
+        a_good_event = 1'b0;
+        b_good_event = 1'b0;
+        a_bad_event  = a_local_fail_event;
+        b_bad_event  = b_local_fail_event;
+        a_recovery_match_event = 1'b0;
+        b_recovery_match_event = 1'b0;
+
+        if (matcher_result_valid) begin
+            case (matcher_result_kind)
+                RESULT_PAIR: begin
+                    if (matcher_pair_equal) begin
+                        a_good_event = 1'b1;
+                        b_good_event = 1'b1;
+                        a_recovery_match_event = 1'b1;
+                        b_recovery_match_event = 1'b1;
+                    end
+                    else begin
+                        // 어느 채널의 데이터가 틀렸는지 특정할 수 없다.
+                        a_bad_event = 1'b1;
+                        b_bad_event = 1'b1;
+                    end
+                end
+
+                RESULT_SINGLE_A: begin
+                    // A 프레임만 존재: A는 정상 수신, B는 누락
+                    a_good_event = 1'b1;
+                    b_bad_event  = 1'b1;
+                end
+
+                RESULT_SINGLE_B: begin
+                    // B 프레임만 존재: A는 누락, B는 정상 수신
+                    a_bad_event  = 1'b1;
+                    b_good_event = 1'b1;
+                end
+
+                RESULT_NONE: begin
+                    // 동작 없음
+                end
+
+                default: begin
+                    // 동작 없음
+                end
+            endcase
+        end
+
+        // 같은 클럭에 Good과 Local Fail이 겹치면 Fail을 우선한다.
+        if (a_bad_event)
+            a_good_event = 1'b0;
+
+        if (b_bad_event)
+            b_good_event = 1'b0;
+
+        if (a_bad_event)
+            a_recovery_match_event = 1'b0;
+
+        if (b_bad_event)
+            b_recovery_match_event = 1'b0;
+    end
+
+    // -------------------------------------------------------------------------
+    // Channel A 상태 관리
+    // -------------------------------------------------------------------------
+    always @(posedge clk or posedge reset_p) begin
+        if (reset_p) begin
+            a_fault             <= 1'b0;
+            a_fail_count        <= 8'd0;
+            a_recover_count     <= 8'd0;
+            a_fault_enter_pulse <= 1'b0;
+            a_recovered_pulse   <= 1'b0;
+        end
+        else begin
+            a_fault_enter_pulse <= 1'b0;
+            a_recovered_pulse   <= 1'b0;
+
+            if (a_bad_event) begin
+                // Fail이 발생하면 복구 연속 횟수는 끊긴다.
+                a_recover_count <= 8'd0;
+
+                if (!a_fault) begin
+                    if ((FAIL_THRESHOLD <= 1) ||
+                        (a_fail_count >= (FAIL_THRESHOLD - 1))) begin
+                        a_fault             <= 1'b1;
+                        a_fail_count        <= FAIL_THRESHOLD;
+                        a_fault_enter_pulse <= 1'b1;
+                    end
+                    else begin
+                        a_fail_count <= a_fail_count + 1'b1;
+                    end
+                end
+            end
+            else if (a_fault) begin
+                if (a_recovery_match_event) begin
+                    // Fault 채널은 정상 Pair가 연속 5회 들어와야 복구한다.
+                    if ((RECOVER_THRESHOLD <= 1) ||
+                        (a_recover_count >= (RECOVER_THRESHOLD - 1))) begin
+                        a_fault           <= 1'b0;
+                        a_fail_count      <= 8'd0;
+                        a_recover_count   <= 8'd0;
+                        a_recovered_pulse <= 1'b1;
+                    end
+                    else begin
+                        a_recover_count <= a_recover_count + 1'b1;
+                    end
+                end
+                else if (matcher_result_valid) begin
+                    // Pair 일치가 아닌 Matcher 결과는 복구 연속성을 끊는다.
+                    a_recover_count <= 8'd0;
+                end
+            end
+            else if (a_good_event) begin
+                // 정상 채널의 Good 사건은 연속 Fail 횟수를 초기화한다.
+                a_fail_count    <= 8'd0;
+                a_recover_count <= 8'd0;
+            end
+        end
+    end
+
+    // -------------------------------------------------------------------------
+    // Channel B 상태 관리
+    // -------------------------------------------------------------------------
+    always @(posedge clk or posedge reset_p) begin
+        if (reset_p) begin
+            b_fault             <= 1'b0;
+            b_fail_count        <= 8'd0;
+            b_recover_count     <= 8'd0;
+            b_fault_enter_pulse <= 1'b0;
+            b_recovered_pulse   <= 1'b0;
+        end
+        else begin
+            b_fault_enter_pulse <= 1'b0;
+            b_recovered_pulse   <= 1'b0;
+
+            if (b_bad_event) begin
+                // Fail이 발생하면 복구 연속 횟수는 끊긴다.
+                b_recover_count <= 8'd0;
+
+                if (!b_fault) begin
+                    if ((FAIL_THRESHOLD <= 1) ||
+                        (b_fail_count >= (FAIL_THRESHOLD - 1))) begin
+                        b_fault             <= 1'b1;
+                        b_fail_count        <= FAIL_THRESHOLD;
+                        b_fault_enter_pulse <= 1'b1;
+                    end
+                    else begin
+                        b_fail_count <= b_fail_count + 1'b1;
+                    end
+                end
+            end
+            else if (b_fault) begin
+                if (b_recovery_match_event) begin
+                    // Fault 채널은 정상 Pair가 연속 5회 들어와야 복구한다.
+                    if ((RECOVER_THRESHOLD <= 1) ||
+                        (b_recover_count >= (RECOVER_THRESHOLD - 1))) begin
+                        b_fault           <= 1'b0;
+                        b_fail_count      <= 8'd0;
+                        b_recover_count   <= 8'd0;
+                        b_recovered_pulse <= 1'b1;
+                    end
+                    else begin
+                        b_recover_count <= b_recover_count + 1'b1;
+                    end
+                end
+                else if (matcher_result_valid) begin
+                    // Pair 일치가 아닌 Matcher 결과는 복구 연속성을 끊는다.
+                    b_recover_count <= 8'd0;
+                end
+            end
+            else if (b_good_event) begin
+                // 정상 채널의 Good 사건은 연속 Fail 횟수를 초기화한다.
+                b_fail_count    <= 8'd0;
+                b_recover_count <= 8'd0;
+            end
+        end
+    end
+
+endmodule
