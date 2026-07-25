@@ -536,6 +536,8 @@ module redundant_link_core #(
     wire        matcher_timeout;
     wire        matcher_seq_skew;
     wire        matcher_seq_ambiguous;
+    wire        matcher_a_seq_gap;
+    wire        matcher_b_seq_gap;
     wire        pair_wait_active;
     wire [7:0]  matcher_length;
     wire [7:0]  matcher_device_id;
@@ -577,6 +579,8 @@ module redundant_link_core #(
         .result_timeout       (matcher_timeout),
         .result_seq_skew      (matcher_seq_skew),
         .result_seq_ambiguous (matcher_seq_ambiguous),
+        .result_a_seq_gap     (matcher_a_seq_gap),
+        .result_b_seq_gap     (matcher_b_seq_gap),
         .pair_wait_active     (pair_wait_active),
         .out_frame_length     (matcher_length),
         .out_device_id        (matcher_device_id),
@@ -620,8 +624,10 @@ module redundant_link_core #(
         .clear                (datapath_clear),
         .matcher_result_valid (matcher_result_valid),
         .matcher_result_kind  (matcher_result_kind),
-        .matcher_pair_equal   (matcher_pair_equal),
-        .a_local_fail_event   (a_local_fail_event),
+        .matcher_pair_equal        (matcher_pair_equal),
+        .matcher_result_a_seq_gap   (matcher_a_seq_gap),
+        .matcher_result_b_seq_gap   (matcher_b_seq_gap),
+        .a_local_fail_event          (a_local_fail_event),
         .b_local_fail_event   (b_local_fail_event),
         .fail_threshold_cfg   (fail_threshold),
         .recover_threshold_cfg(recovery_count_cfg),
