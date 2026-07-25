@@ -36,6 +36,8 @@ module channel_health_mgr #(
     input  wire       matcher_result_valid,
     input  wire [1:0] matcher_result_kind,
     input  wire       matcher_pair_equal,
+    input  wire       matcher_result_a_seq_gap,
+    input  wire       matcher_result_b_seq_gap,
 
     // pair_matcher 외부에서 발생한 채널별 오류 Pulse
     input  wire       a_local_fail_event,
@@ -90,12 +92,14 @@ module channel_health_mgr #(
         matcher_result_valid &&
         (matcher_result_kind == RESULT_PAIR) &&
         matcher_pair_equal &&
+        !matcher_result_a_seq_gap &&
         !a_local_fail_event;
 
     assign b_recovery_match_event =
         matcher_result_valid &&
         (matcher_result_kind == RESULT_PAIR) &&
         matcher_pair_equal &&
+        !matcher_result_b_seq_gap &&
         !b_local_fail_event;
 
     always @(*) begin
@@ -108,26 +112,38 @@ module channel_health_mgr #(
             case (matcher_result_kind)
                 RESULT_PAIR: begin
                     if (matcher_pair_equal) begin
-                        a_good_event = 1'b1;
-                        b_good_event = 1'b1;
+                        // GAP 채널은 앞에서 이미 Fail 1회가 반영됐으므로
+                        // 이 Pair 결과에서는 Good으로 계산하지 않는다.
+                        if (!matcher_result_a_seq_gap)
+                            a_good_event = 1'b1;
+
+                        if (!matcher_result_b_seq_gap)
+                            b_good_event = 1'b1;
                     end
                     else begin
-                        // 어느 채널의 데이터가 틀렸는지 특정할 수 없다.
-                        a_bad_event = 1'b1;
-                        b_bad_event = 1'b1;
+                        // GAP 채널은 중복 Fail을 막기 위해 Neutral 처리한다.
+                        if (!matcher_result_a_seq_gap)
+                            a_bad_event = 1'b1;
+
+                        if (!matcher_result_b_seq_gap)
+                            b_bad_event = 1'b1;
                     end
                 end
 
                 RESULT_SINGLE_A: begin
-                    // A 프레임만 존재: A는 정상 수신, B는 누락
-                    a_good_event = 1'b1;
-                    b_bad_event  = 1'b1;
+                    // A GAP이면 A는 Neutral, 반대편 B는 누락 Fail이다.
+                    if (!matcher_result_a_seq_gap)
+                        a_good_event = 1'b1;
+
+                    b_bad_event = 1'b1;
                 end
 
                 RESULT_SINGLE_B: begin
-                    // B 프레임만 존재: A는 누락, B는 정상 수신
-                    a_bad_event  = 1'b1;
-                    b_good_event = 1'b1;
+                    // B GAP이면 B는 Neutral, 반대편 A는 누락 Fail이다.
+                    a_bad_event = 1'b1;
+
+                    if (!matcher_result_b_seq_gap)
+                        b_good_event = 1'b1;
                 end
 
                 RESULT_NONE: begin

@@ -51,6 +51,8 @@ module pair_matcher #(
     output reg          result_timeout,
     output reg          result_seq_skew,
     output reg          result_seq_ambiguous,
+    output reg          result_a_seq_gap,
+    output reg          result_b_seq_gap,
     output reg          pair_wait_active,
 
     output reg  [7:0]   out_frame_length,
@@ -100,6 +102,8 @@ module pair_matcher #(
             result_timeout        <= 1'b0;
             result_seq_skew       <= 1'b0;
             result_seq_ambiguous  <= 1'b0;
+            result_a_seq_gap      <= 1'b0;
+            result_b_seq_gap      <= 1'b0;
             pair_wait_active      <= 1'b0;
             out_frame_length      <= 8'd0;
             out_device_id         <= 8'd0;
@@ -121,6 +125,8 @@ module pair_matcher #(
             result_timeout        <= 1'b0;
             result_seq_skew       <= 1'b0;
             result_seq_ambiguous  <= 1'b0;
+            result_a_seq_gap      <= 1'b0;
+            result_b_seq_gap      <= 1'b0;
             pair_wait_active      <= 1'b0;
             out_frame_length      <= 8'd0;
             out_device_id         <= 8'd0;
@@ -140,6 +146,8 @@ module pair_matcher #(
             result_timeout       <= 1'b0;
             result_seq_skew      <= 1'b0;
             result_seq_ambiguous <= 1'b0;
+            result_a_seq_gap     <= 1'b0;
+            result_b_seq_gap     <= 1'b0;
 
             if (consume_holdoff) begin
                 // pop_a/pop_b는 FIFO가 다음 상승 에지에서 처리한다.
@@ -160,6 +168,8 @@ module pair_matcher #(
                     result_kind       <= RESULT_PAIR;
                     mismatch_flags    <= pair_mismatch;
                     result_pair_equal <= (pair_mismatch == 6'd0);
+                    result_a_seq_gap  <= a_seq_gap;
+                    result_b_seq_gap  <= b_seq_gap;
 
                     out_frame_length <= a_frame_length;
                     out_device_id    <= a_device_id;
@@ -179,6 +189,8 @@ module pair_matcher #(
                     result_pair_equal    <= 1'b0;
                     mismatch_flags       <= 6'b00_0001;
                     result_seq_ambiguous <= 1'b1;
+                    result_a_seq_gap     <= a_seq_gap;
+                    result_b_seq_gap     <= b_seq_gap;
 
                     out_frame_length <= a_frame_length;
                     out_device_id    <= a_device_id;
@@ -191,11 +203,13 @@ module pair_matcher #(
                 else if (b_minus_a < 8'd128) begin
                     // B가 앞선 번호이므로 A가 더 오래된 Frame이다.
                     pop_a            <= 1'b1;
-                    result_valid     <= 1'b1;
+                    result_valid     <= 1'b0;
                     consume_holdoff  <= 1'b1;
                     result_kind      <= RESULT_SINGLE_A;
                     result_seq_skew  <= 1'b1;
                     mismatch_flags   <= 6'b00_0001;
+                    result_a_seq_gap <= 1'b0;
+                    result_b_seq_gap <= 1'b0;
 
                     out_frame_length <= a_frame_length;
                     out_device_id    <= a_device_id;
@@ -208,11 +222,13 @@ module pair_matcher #(
                 else begin
                     // A가 앞선 번호이므로 B가 더 오래된 Frame이다.
                     pop_b            <= 1'b1;
-                    result_valid     <= 1'b1;
+                    result_valid     <= 1'b0;
                     consume_holdoff  <= 1'b1;
                     result_kind      <= RESULT_SINGLE_B;
                     result_seq_skew  <= 1'b1;
                     mismatch_flags   <= 6'b00_0001;
+                    result_a_seq_gap <= 1'b0;
+                    result_b_seq_gap <= 1'b0;
 
                     out_frame_length <= b_frame_length;
                     out_device_id    <= b_device_id;
@@ -236,6 +252,8 @@ module pair_matcher #(
                     if (!a_empty) begin
                         pop_a            <= 1'b1;
                         result_kind      <= RESULT_SINGLE_A;
+                        result_a_seq_gap <= a_seq_gap;
+                        result_b_seq_gap <= 1'b0;
                         out_frame_length <= a_frame_length;
                         out_device_id    <= a_device_id;
                         out_command      <= a_command;
@@ -247,6 +265,8 @@ module pair_matcher #(
                     else begin
                         pop_b            <= 1'b1;
                         result_kind      <= RESULT_SINGLE_B;
+                        result_a_seq_gap <= 1'b0;
+                        result_b_seq_gap <= b_seq_gap;
                         out_frame_length <= b_frame_length;
                         out_device_id    <= b_device_id;
                         out_command      <= b_command;
