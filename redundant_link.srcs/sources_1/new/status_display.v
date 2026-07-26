@@ -9,22 +9,11 @@
 //   MicroBlaze가 Halt되어도 현재 상태를 계속 확인할 수 있다.
 //
 // LED Mapping
-//   LED[0]  : System Enable
-//   LED[1]  : Channel A Usable, Alive && !Fault
-//   LED[2]  : Channel B Usable, Alive && !Fault
-//   LED[3]  : Channel A Fault
-//   LED[4]  : Channel B Fault
-//   LED[5]  : Degraded, 한 채널만 사용 가능
-//   LED[6]  : Both Fault
-//   LED[7]  : Pair Wait Active
-//   LED[8]  : Output UART Busy
-//   LED[9]  : Event FIFO Not Empty
-//   LED[10] : Frame Mismatch Latched
-//   LED[11] : Both Invalid Latched
-//   LED[12] : Duplicate Drop 표시, Pulse를 일정 시간 연장
-//   LED[13] : Event Lost Latched
-//   LED[14] : IRQ
-//   LED[15] : Heartbeat, System Enable일 때만 점멸
+//   LED[0]    : Heartbeat, System Enable일 때만 점멸
+//   LED[1]    : 종합 Alert
+//               A/B Fault, Frame Mismatch, Both Invalid,
+//               Duplicate Drop 또는 Event Lost 중 하나 이상일 때 점등
+//   LED[15:2] : 항상 꺼짐
 //
 // FND 표시
 //   비활성 상태 : "0FF "  (7-Segment에서 0을 O처럼 사용)
@@ -231,26 +220,19 @@ module status_display #(
     // LED 상태 조합
     // -------------------------------------------------------------------------
     always @(*) begin
-        if (reset_p) begin
-            led = 16'd0;
-        end
-        else begin
-            led[0]  = system_enable;
-            led[1]  = system_enable && channel_a_usable;
-            led[2]  = system_enable && channel_b_usable;
-            led[3]  = a_fault;
-            led[4]  = b_fault;
-            led[5]  = channel_a_usable ^ channel_b_usable;
-            led[6]  = a_fault && b_fault;
-            led[7]  = pair_wait_active;
-            led[8]  = output_busy;
-            led[9]  = event_fifo_not_empty;
-            led[10] = frame_mismatch_latched;
-            led[11] = both_invalid_latched;
-            led[12] = duplicate_indicator;
-            led[13] = event_lost_latched;
-            led[14] = irq;
-            led[15] = heartbeat_state;
+        led = 16'd0;
+
+        if (!reset_p) begin
+            led[0] = heartbeat_state;
+            led[1] = system_enable &&
+                     (
+                         a_fault                ||
+                         b_fault                ||
+                         frame_mismatch_latched ||
+                         both_invalid_latched   ||
+                         duplicate_indicator   ||
+                         event_lost_latched
+                     );
         end
     end
 

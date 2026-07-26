@@ -5,13 +5,13 @@
 //
 // 검증 항목
 //   1. Reset 중 LED/FND가 모두 꺼지는지
-//   2. System Disable에서 "0FF "가 표시되는지
+//   2. System Disable에서 LED가 모두 꺼지고 "0FF "가 표시되는지
 //   3. Healthy/Single A/Single B/Both Fault Mode 표시가 맞는지
 //   4. 마지막 선택 채널과 8-bit Sequence가 정상적으로 Latch되는지
 //   5. Disable 후 재활성화하면 이전 Frame 표시가 제거되는지
-//   6. 16개 LED Mapping이 정확한지
-//   7. Duplicate Drop Pulse가 설정한 시간만큼 연장되고 재Trigger되는지
-//   8. Heartbeat가 Enable에서만 Toggle되고 Disable에서 Clear되는지
+//   6. LED[1] 종합 Alert와 LED[15:2] 고정 0 Mapping이 정확한지
+//   7. Duplicate Alert가 설정한 시간만큼 유지되고 재Trigger되는지
+//   8. LED[0] Heartbeat가 Enable에서만 Toggle되고 Disable에서 Clear되는지
 //   9. FND Anode가 Active-Low One-Hot으로 순환하고 DP가 꺼져 있는지
 //////////////////////////////////////////////////////////////////////////////////
 
@@ -221,6 +221,13 @@ module tb_status_display;
         end
     endtask
 
+    // 모든 테스트 상태에서 사용하지 않는 LED는 항상 꺼져 있어야 한다.
+    always @(negedge clk) begin
+        #1;
+        if (led[15:2] !== 14'd0)
+            report_error("LED[15:2] must always remain zero");
+    end
+
     initial begin
         reset_p                = 1'b1;
         system_enable          = 1'b0;
@@ -255,19 +262,19 @@ module tb_status_display;
         // ---------------------------------------------------------------------
         @(negedge clk);
         system_enable = 1'b1;
-        expect_led_mask(16'h007F, 16'h0001, "enabled but waiting sync");
+        expect_led_mask(16'hFFFE, 16'h0000, "alert off while waiting sync");
         expect_display(SEG_DASH, SEG_DASH, SEG_DASH, SEG_DASH);
 
         @(negedge clk);
         channel_a_alive = 1'b1;
         channel_b_alive = 1'b1;
-        expect_led_mask(16'h007F, 16'h0007, "enabled dual healthy LEDs");
+        expect_led_mask(16'hFFFE, 16'h0000, "alert off while dual healthy");
         expect_display(SEG_D, SEG_DASH, SEG_DASH, SEG_DASH);
 
         // Fault 확정 전이라도 한 채널만 Alive이면 Degraded로 표시한다.
         @(negedge clk);
         channel_b_alive = 1'b0;
-        expect_led_mask(16'h007F, 16'h0023, "one usable channel is degraded");
+        expect_led_mask(16'hFFFE, 16'h0000, "alert off without fault");
         expect_display(SEG_A, SEG_DASH, SEG_DASH, SEG_DASH);
 
         @(negedge clk);
@@ -293,9 +300,9 @@ module tb_status_display;
         channel_b_alive = 1'b0;
         expect_display(SEG_A, SEG_B, SEG_A, SEG_5);
         expect_led_mask(
-            16'h007F,
-            16'h0033,
-            "B fault means A-only degraded mode"
+            16'hFFFE,
+            16'h0002,
+            "B fault raises aggregate alert"
         );
 
         @(negedge clk);
@@ -305,9 +312,9 @@ module tb_status_display;
         channel_b_alive = 1'b1;
         expect_display(SEG_B, SEG_B, SEG_A, SEG_5);
         expect_led_mask(
-            16'h007F,
-            16'b0000_0000_0010_1101,
-            "A fault means B-only degraded mode"
+            16'hFFFE,
+            16'h0002,
+            "A fault raises aggregate alert"
         );
 
         @(negedge clk);
@@ -315,13 +322,13 @@ module tb_status_display;
         channel_b_alive = 1'b0;
         expect_display(SEG_F, SEG_B, SEG_A, SEG_5);
         expect_led_mask(
-            16'h007F,
-            16'b0000_0000_0101_1001,
-            "both fault mode"
+            16'hFFFE,
+            16'h0002,
+            "both fault raises aggregate alert"
         );
 
         // ---------------------------------------------------------------------
-        // 5. 나머지 상태 LED Mapping
+        // 5. Latched Error별 종합 Alert
         // ---------------------------------------------------------------------
         @(negedge clk);
         a_fault                = 1'b0;
@@ -331,60 +338,105 @@ module tb_status_display;
         pair_wait_active       = 1'b1;
         output_busy            = 1'b1;
         event_fifo_not_empty   = 1'b1;
-        frame_mismatch_latched = 1'b1;
-        both_invalid_latched   = 1'b1;
-        event_lost_latched     = 1'b1;
         irq                     = 1'b1;
 
         expect_led_mask(
-            16'h6F80,
-            16'h6F80,
-            "pair/output/event/error/irq LED mapping"
+            16'hFFFE,
+            16'h0000,
+            "non-alert status inputs do not drive LEDs"
         );
+
+        frame_mismatch_latched = 1'b1;
+        expect_led_mask(
+            16'hFFFE,
+            16'h0002,
+            "frame mismatch raises aggregate alert"
+        );
+
+        frame_mismatch_latched = 1'b0;
+        both_invalid_latched   = 1'b1;
+        expect_led_mask(
+            16'hFFFE,
+            16'h0002,
+            "both invalid raises aggregate alert"
+        );
+
+        both_invalid_latched = 1'b0;
+        event_lost_latched   = 1'b1;
+        expect_led_mask(
+            16'hFFFE,
+            16'h0002,
+            "event lost raises aggregate alert"
+        );
+
+        event_lost_latched = 1'b0;
+        expect_led_mask(16'hFFFE, 16'h0000, "latched alerts clear");
 
         // ---------------------------------------------------------------------
         // 6. Duplicate Pulse Stretch 및 재Trigger
         // ---------------------------------------------------------------------
         send_duplicate_pulse;
-        expect_led_mask(16'h1000, 16'h1000, "duplicate LED starts");
+        expect_led_mask(16'hFFFE, 16'h0002, "duplicate alert hold cycle 1");
 
         @(negedge clk);
-        expect_led_mask(16'h1000, 16'h1000, "duplicate LED hold cycle 2");
+        expect_led_mask(16'hFFFE, 16'h0002, "duplicate alert hold cycle 2");
+
+        @(negedge clk);
+        expect_led_mask(16'hFFFE, 16'h0002, "duplicate alert hold cycle 3");
+
+        @(negedge clk);
+        expect_led_mask(16'hFFFE, 16'h0000, "duplicate alert expires");
+
+        send_duplicate_pulse;
+        expect_led_mask(16'hFFFE, 16'h0002, "duplicate alert restarts");
+
+        @(negedge clk);
+        expect_led_mask(16'hFFFE, 16'h0002, "duplicate restart hold 2");
 
         // 유지 중 재Trigger하면 3 Cycle을 다시 센다.
         send_duplicate_pulse;
-        expect_led_mask(16'h1000, 16'h1000, "duplicate LED retrigger");
+        expect_led_mask(16'hFFFE, 16'h0002, "duplicate alert retrigger");
 
         @(negedge clk);
-        expect_led_mask(16'h1000, 16'h1000, "duplicate retrigger hold 2");
+        expect_led_mask(16'hFFFE, 16'h0002, "duplicate retrigger hold 2");
 
         @(negedge clk);
-        expect_led_mask(16'h1000, 16'h1000, "duplicate retrigger hold 3");
+        expect_led_mask(16'hFFFE, 16'h0002, "duplicate retrigger hold 3");
 
         @(negedge clk);
-        expect_led_mask(16'h1000, 16'h0000, "duplicate LED expires");
+        expect_led_mask(16'hFFFE, 16'h0000, "retriggered alert expires");
 
         // ---------------------------------------------------------------------
         // 7. Heartbeat: Enable에서 Toggle, Disable에서 즉시 Clear
         // ---------------------------------------------------------------------
-        heartbeat_before = led[15];
+        heartbeat_before = led[0];
         repeat (4) @(posedge clk);
         #1;
 
-        if (led[15] === heartbeat_before)
+        if (led[0] === heartbeat_before)
             report_error("heartbeat must toggle after configured cycles");
 
         @(negedge clk);
-        system_enable = 1'b0;
+        system_enable          = 1'b0;
+        a_fault                = 1'b1;
+        b_fault                = 1'b1;
+        frame_mismatch_latched = 1'b1;
+        both_invalid_latched   = 1'b1;
+        event_lost_latched     = 1'b1;
         @(posedge clk);
         #1;
 
-        if (led[15] !== 1'b0)
-            report_error("heartbeat must clear while system is disabled");
+        if (led !== 16'h0000)
+            report_error("all LEDs must clear while system is disabled");
 
         // Disable은 마지막 Frame 표시도 Clear한다.
         @(negedge clk);
-        system_enable = 1'b1;
+        system_enable          = 1'b1;
+        a_fault                = 1'b0;
+        b_fault                = 1'b0;
+        frame_mismatch_latched = 1'b0;
+        both_invalid_latched   = 1'b0;
+        event_lost_latched     = 1'b0;
         expect_display(SEG_D, SEG_DASH, SEG_DASH, SEG_DASH);
 
         // ---------------------------------------------------------------------
