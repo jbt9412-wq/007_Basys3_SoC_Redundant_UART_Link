@@ -29,6 +29,9 @@ The final RTL was validated with Vivado 2024.2 in Verilog-2005 mode.
 - All Design Sources and 16 self-checking testbenches compile and elaborate
   successfully: 15 standalone module tests plus `tb_redundant_link_core`.
 - Simulation result: 16/16 PASS.
+- `tb_fail_count_per_transaction` additionally checks the implemented fail-event
+  policy: a local CRC error and the following pair-missing result are counted
+  separately, and the configured threshold is applied to the event count.
 - Out-of-context synthesis, placement, physical optimization, and routing of
   `redundant_link_core` complete with 0 errors and 0 unrouted nets.
 - 100 MHz timing passes with WNS `+0.143 ns`, TNS `0.000 ns`,
