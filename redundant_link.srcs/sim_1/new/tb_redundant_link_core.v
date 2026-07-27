@@ -632,10 +632,12 @@ module tb_redundant_link_core;
         end
 
         repeat (5) @(posedge clk);
-        if (!led[3] || !led[4] || !led[6]) begin
+        if ((led[1] !== 1'b1) ||
+            (led[15:2] !== 14'd0)) begin
             $display(
-                "[FAIL] Fault LEDs expected A/B/Both=111 actual=%b%b%b",
-                led[3], led[4], led[6]
+                "[FAIL] Aggregate Alert expected LED1=1, LED15:2=0 actual=%b/%h",
+                led[1],
+                led[15:2]
             );
             error_count = error_count + 1;
         end
