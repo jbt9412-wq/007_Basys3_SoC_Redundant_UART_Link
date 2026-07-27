@@ -43,6 +43,8 @@ module tb_pair_matcher;
     wire         result_timeout;
     wire         result_seq_skew;
     wire         result_seq_ambiguous;
+    wire         result_a_seq_gap;
+    wire         result_b_seq_gap;
     wire         pair_wait_active;
     wire [7:0]   out_sequence;
     wire         out_seq_gap;
@@ -84,6 +86,8 @@ module tb_pair_matcher;
         .result_timeout       (result_timeout),
         .result_seq_skew      (result_seq_skew),
         .result_seq_ambiguous (result_seq_ambiguous),
+        .result_a_seq_gap     (result_a_seq_gap),
+        .result_b_seq_gap     (result_b_seq_gap),
         .pair_wait_active     (pair_wait_active),
 
         .out_frame_length     (),
@@ -100,10 +104,12 @@ module tb_pair_matcher;
 
     task apply_reset;
         begin
-            a_empty = 1'b1;
-            b_empty = 1'b1;
-            reset_p = 1'b1;
-            clear   = 1'b0;
+            a_empty  = 1'b1;
+            b_empty  = 1'b1;
+            a_seq_gap = 1'b0;
+            b_seq_gap = 1'b0;
+            reset_p  = 1'b1;
+            clear    = 1'b0;
             repeat (2) @(posedge clk);
             @(negedge clk);
             reset_p = 1'b0;
@@ -155,6 +161,26 @@ module tb_pair_matcher;
                     result_seq_ambiguous, expected_ambiguous,
                     pair_wait_active, expected_wait,
                     out_sequence, expected_sequence
+                );
+            end
+        end
+    endtask
+
+    task check_gap_metadata;
+        input expected_a_seq_gap;
+        input expected_b_seq_gap;
+        input expected_out_seq_gap;
+        begin
+            if ((result_a_seq_gap !== expected_a_seq_gap) ||
+                (result_b_seq_gap !== expected_b_seq_gap) ||
+                (out_seq_gap      !== expected_out_seq_gap)) begin
+                error_count = error_count + 1;
+                $display(
+                    "[FAIL] t=%0t gap metadata a=%b/%b b=%b/%b out=%b/%b",
+                    $time,
+                    result_a_seq_gap, expected_a_seq_gap,
+                    result_b_seq_gap, expected_b_seq_gap,
+                    out_seq_gap, expected_out_seq_gap
                 );
             end
         end
@@ -218,12 +244,14 @@ module tb_pair_matcher;
         // Equal pair and one-cycle consume holdoff.
         apply_reset;
         @(negedge clk);
+        a_seq_gap = 1'b1;
         a_empty = 1'b0;
         b_empty = 1'b0;
         check_after_clock(
             1'b1, PAIR, 1'b1, 1'b1, 1'b1, 6'b000000,
             1'b0, 1'b0, 1'b0, 1'b0, 8'h10
         );
+        check_gap_metadata(1'b1, 1'b0, 1'b1);
         check_after_clock(
             1'b0, NONE, 1'b0, 1'b0, 1'b0, 6'b000000,
             1'b0, 1'b0, 1'b0, 1'b0, 8'h00
@@ -251,7 +279,7 @@ module tb_pair_matcher;
         a_empty        = 1'b0;
         b_empty        = 1'b0;
         check_after_clock(
-            1'b1, SINGLE_A, 1'b1, 1'b0, 1'b0, 6'b000001,
+            1'b0, SINGLE_A, 1'b1, 1'b0, 1'b0, 6'b000001,
             1'b0, 1'b1, 1'b0, 1'b0, 8'h20
         );
 
@@ -263,7 +291,7 @@ module tb_pair_matcher;
         a_empty    = 1'b0;
         b_empty    = 1'b0;
         check_after_clock(
-            1'b1, SINGLE_B, 1'b0, 1'b1, 1'b0, 6'b000001,
+            1'b0, SINGLE_B, 1'b0, 1'b1, 1'b0, 6'b000001,
             1'b0, 1'b1, 1'b0, 1'b0, 8'hFF
         );
 
@@ -284,6 +312,7 @@ module tb_pair_matcher;
         pair_timeout_cycles = 32'd3;
         @(negedge clk);
         a_sequence = 8'h30;
+        a_seq_gap  = 1'b1;
         a_empty    = 1'b0;
         b_empty    = 1'b1;
         check_after_clock(
@@ -298,6 +327,7 @@ module tb_pair_matcher;
             1'b1, SINGLE_A, 1'b1, 1'b0, 1'b0, 6'b000000,
             1'b1, 1'b0, 1'b0, 1'b0, 8'h30
         );
+        check_gap_metadata(1'b1, 1'b0, 1'b1);
 
         // A different runtime setting applies without changing the parameter.
         apply_reset;
@@ -306,6 +336,7 @@ module tb_pair_matcher;
         a_empty    = 1'b1;
         b_empty    = 1'b0;
         b_sequence = 8'h40;
+        b_seq_gap  = 1'b1;
         check_after_clock(
             1'b0, NONE, 1'b0, 1'b0, 1'b0, 6'b000000,
             1'b0, 1'b0, 1'b0, 1'b1, 8'h00
@@ -314,6 +345,7 @@ module tb_pair_matcher;
             1'b1, SINGLE_B, 1'b0, 1'b1, 1'b0, 6'b000000,
             1'b1, 1'b0, 1'b0, 1'b0, 8'h40
         );
+        check_gap_metadata(1'b0, 1'b1, 1'b1);
 
         // clear is sampled synchronously and cancels an active wait.
         apply_reset;

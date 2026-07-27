@@ -31,6 +31,7 @@ module tb_frame_parser;
     // DUT 레지스터가 아니라 테스트벤치 관찰용 신호이다.
     reg interbyte_timeout_seen;
     reg frame_timeout_seen;
+    integer error_count;
 
     frame_parser #(
         // 단위 테스트 시간을 줄이기 위한 값이다.
@@ -106,6 +107,7 @@ module tb_frame_parser;
         rx_frame_error         = 1'b0;
         interbyte_timeout_seen = 1'b0;
         frame_timeout_seen     = 1'b0;
+        error_count            = 0;
 
         repeat (5) @(negedge clk);
         reset_p = 1'b0;
@@ -135,15 +137,19 @@ module tb_frame_parser;
             (payload_data      == 128'h0000000000000000000000000000DEAD) &&
             (received_crc      == 16'h1234))
             $display("[PASS] 필드 조립과 packet_valid 정상");
-        else
+        else begin
+            error_count = error_count + 1;
             $display("[FAIL] 정상 프레임 조립 결과 확인 필요");
+        end
 
         // packet_valid가 한 클럭 펄스인지 확인
         @(negedge clk);
         if (packet_valid == 1'b0)
             $display("[PASS] packet_valid 1클럭 펄스 정상");
-        else
+        else begin
+            error_count = error_count + 1;
             $display("[FAIL] packet_valid가 1클럭보다 김");
+        end
 
         // ---------------------------------------------------------------------
         // TEST 2: 잘못된 LEN 폐기 후 A5 A5 5A 재동기화
@@ -156,8 +162,10 @@ module tb_frame_parser;
 
         if ((length_error == 1'b1) && (packet_valid == 1'b0))
             $display("[PASS] LEN=2 검출 후 프레임 폐기");
-        else
+        else begin
+            error_count = error_count + 1;
             $display("[FAIL] Length Error 처리 확인 필요");
+        end
 
         // A5 A5 5A에서 두 번째 A5를 새 SYNC1으로 사용한다.
         send_byte(8'hA5);
@@ -178,8 +186,10 @@ module tb_frame_parser;
             (payload_data == 128'd0) &&
             (received_crc == 16'hBEEF))
             $display("[PASS] A5 A5 5A 재동기화와 0Byte Payload 정상");
-        else
+        else begin
+            error_count = error_count + 1;
             $display("[FAIL] 재동기화 결과 확인 필요");
+        end
 
         @(negedge clk);
 
@@ -207,8 +217,10 @@ module tb_frame_parser;
 
         if ((packet_valid == 1'b0) && (dut.state == 4'd0))
             $display("[PASS] 진행 중 프레임 폐기 후 WAIT_SYNC1 복귀");
-        else
+        else begin
+            error_count = error_count + 1;
             $display("[FAIL] UART Framing Error 복귀 상태 확인 필요");
+        end
 
         // ---------------------------------------------------------------------
         // TEST 4: Inter-byte Timeout
@@ -223,8 +235,10 @@ module tb_frame_parser;
 
         if ((interbyte_timeout_seen == 1'b1) && (dut.state == 4'd0))
             $display("[PASS] Inter-byte Timeout 후 WAIT_SYNC1 복귀");
-        else
+        else begin
+            error_count = error_count + 1;
             $display("[FAIL] Inter-byte Timeout 처리 확인 필요");
+        end
 
         // Timeout 후에도 새 정상 프레임을 받을 수 있는지 확인한다.
         send_byte(8'hA5);
@@ -242,8 +256,10 @@ module tb_frame_parser;
             (sequence     == 8'h01) &&
             (received_crc == 16'hCAFE))
             $display("[PASS] Timeout 이후 정상 프레임 수신 복구");
-        else
+        else begin
+            error_count = error_count + 1;
             $display("[FAIL] Timeout 이후 복구 확인 필요");
+        end
 
         @(negedge clk);
 
@@ -278,11 +294,17 @@ module tb_frame_parser;
 
         if ((frame_timeout_seen == 1'b1) && (dut.state == 4'd0))
             $display("[PASS] Frame Timeout 후 WAIT_SYNC1 복귀");
-        else
+        else begin
+            error_count = error_count + 1;
             $display("[FAIL] Frame Timeout 처리 확인 필요");
+        end
 
-        $display("\n테스트 종료 - Waveform에서는 state, rx_valid, packet_valid,");
-        $display("length_error, interbyte_timeout, frame_timeout, crc_start를 함께 확인하세요.");
+        if (error_count == 0)
+            $display("[PASS] All frame_parser core tests passed.");
+        else
+            $display("[FAIL] frame_parser tests failed: %0d error(s).",
+                     error_count);
+
         $finish;
     end
 

@@ -23,6 +23,8 @@ module tb_channel_health_mgr;
     reg       matcher_result_valid;
     reg [1:0] matcher_result_kind;
     reg       matcher_pair_equal;
+    reg       matcher_result_a_seq_gap;
+    reg       matcher_result_b_seq_gap;
 
     reg       a_local_fail_event;
     reg       b_local_fail_event;
@@ -54,6 +56,8 @@ module tb_channel_health_mgr;
         .matcher_result_valid (matcher_result_valid),
         .matcher_result_kind  (matcher_result_kind),
         .matcher_pair_equal   (matcher_pair_equal),
+        .matcher_result_a_seq_gap(matcher_result_a_seq_gap),
+        .matcher_result_b_seq_gap(matcher_result_b_seq_gap),
 
         .a_local_fail_event   (a_local_fail_event),
         .b_local_fail_event   (b_local_fail_event),
@@ -85,11 +89,37 @@ module tb_channel_health_mgr;
             matcher_result_valid = 1'b1;
             matcher_result_kind  = result_kind;
             matcher_pair_equal   = pair_equal;
+            matcher_result_a_seq_gap = 1'b0;
+            matcher_result_b_seq_gap = 1'b0;
 
             @(negedge clk);
             matcher_result_valid = 1'b0;
             matcher_result_kind  = NONE;
             matcher_pair_equal   = 1'b0;
+            matcher_result_a_seq_gap = 1'b0;
+            matcher_result_b_seq_gap = 1'b0;
+        end
+    endtask
+
+    task send_matcher_result_with_gaps;
+        input [1:0] result_kind;
+        input       pair_equal;
+        input       a_seq_gap;
+        input       b_seq_gap;
+        begin
+            @(negedge clk);
+            matcher_result_valid     = 1'b1;
+            matcher_result_kind      = result_kind;
+            matcher_pair_equal       = pair_equal;
+            matcher_result_a_seq_gap = a_seq_gap;
+            matcher_result_b_seq_gap = b_seq_gap;
+
+            @(negedge clk);
+            matcher_result_valid     = 1'b0;
+            matcher_result_kind      = NONE;
+            matcher_pair_equal       = 1'b0;
+            matcher_result_a_seq_gap = 1'b0;
+            matcher_result_b_seq_gap = 1'b0;
         end
     endtask
 
@@ -151,8 +181,10 @@ module tb_channel_health_mgr;
 
     task apply_reset;
         begin
-            clear   = 1'b0;
-            reset_p = 1'b1;
+            clear                    = 1'b0;
+            matcher_result_a_seq_gap = 1'b0;
+            matcher_result_b_seq_gap = 1'b0;
+            reset_p                  = 1'b1;
             repeat (2) @(negedge clk);
             reset_p = 1'b0;
             @(negedge clk);
@@ -165,6 +197,8 @@ module tb_channel_health_mgr;
         matcher_result_valid  = 1'b0;
         matcher_result_kind   = NONE;
         matcher_pair_equal    = 1'b0;
+        matcher_result_a_seq_gap = 1'b0;
+        matcher_result_b_seq_gap = 1'b0;
         a_local_fail_event    = 1'b0;
         b_local_fail_event    = 1'b0;
         fail_threshold_cfg    = 8'd3;
@@ -282,7 +316,45 @@ module tb_channel_health_mgr;
         );
 
         // ---------------------------------------------------------------------
-        // 7. clear is synchronous: state changes only on the next clock edge.
+        // 7. GAP metadata keeps the affected channel Neutral because its local
+        //    sequence error was already counted before the matcher result.
+        // ---------------------------------------------------------------------
+        apply_reset;
+        fail_threshold_cfg    = 8'd3;
+        recover_threshold_cfg = 8'd5;
+
+        send_local_fail(1'b1, 1'b0);
+        send_matcher_result_with_gaps(PAIR, 1'b1, 1'b1, 1'b0);
+        check_state(
+            1'b0, 1'b0, 8'd1, 8'd0, 8'd0, 8'd0,
+            1'b0, 1'b0, 1'b0, 1'b0
+        );
+
+        apply_reset;
+        send_matcher_result_with_gaps(PAIR, 1'b0, 1'b1, 1'b0);
+        check_state(
+            1'b0, 1'b0, 8'd0, 8'd1, 8'd0, 8'd0,
+            1'b0, 1'b0, 1'b0, 1'b0
+        );
+
+        apply_reset;
+        send_matcher_result_with_gaps(SINGLE_A, 1'b0, 1'b1, 1'b0);
+        check_state(
+            1'b0, 1'b0, 8'd0, 8'd1, 8'd0, 8'd0,
+            1'b0, 1'b0, 1'b0, 1'b0
+        );
+
+        apply_reset;
+        for (test_index = 0; test_index < 3; test_index = test_index + 1)
+            send_local_fail(1'b1, 1'b0);
+        send_matcher_result_with_gaps(PAIR, 1'b1, 1'b1, 1'b0);
+        check_state(
+            1'b1, 1'b0, 8'd3, 8'd0, 8'd0, 8'd0,
+            1'b0, 1'b0, 1'b0, 1'b0
+        );
+
+        // ---------------------------------------------------------------------
+        // 8. clear is synchronous: state changes only on the next clock edge.
         // ---------------------------------------------------------------------
         apply_reset;
         fail_threshold_cfg    = 8'd3;
