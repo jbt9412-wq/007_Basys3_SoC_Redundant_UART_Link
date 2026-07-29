@@ -1,9 +1,17 @@
 # Vivado Integration
 
-Final Vivado 2024.2 integration records for the Basys3 SoC system.
+`vivado_project_files.zip` contains the final Vivado 2024.2 project file, final `system_bd.bd`, generated wrapper, and Basys3 XDC used for the hardware demonstration.
 
-- `BLOCK_DESIGN.md` documents the final MicroBlaze V, AXI, interrupt, and custom-IP connections.
-- `constraints/basys3_redundant_link.xdc` contains the final board I/O constraints.
-- `wrapper/system_bd_wrapper.v` is the final generated top-level wrapper used for the hardware demonstration.
+The custom IP source archives are stored under `hardware/ip/`. From the repository root, run:
 
-The complete generated Vivado workspace is intentionally excluded because it contains cache, run, and temporary output directories.
+```bash
+python3 hardware/vivado/scripts/prepare_vivado_project.py
+```
+
+Then open:
+
+```text
+hardware/vivado/project/redundant_link/redundant_link.xpr
+```
+
+The Digilent Basys3 board files must be installed in Vivado. Regenerate Block Design output products if Vivado requests it.
