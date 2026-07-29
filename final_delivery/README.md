@@ -8,10 +8,10 @@ This directory contains the source snapshot used for the final Basys3 SoC redund
 - `sensor_guard_ip_source.zip` — sensor guard AXI IP source and testbench.
 - `voltage_display_ip_source.zip` — voltage conversion and FND display IP source, packaged-IP metadata, and testbench.
 - `vitis/redundant_link_app/src/` — final MicroBlaze V application changes used for link initialization, Sensor Guard configuration, AXI readback verification, interrupt/event logging, and status output.
-- `vivado/` — final integrated Block Design, top wrapper, and Basys3 constraints.
-- The complete STM32 sender/receiver CubeIDE projects used for the demonstration are retained in the repository root as `stm_setting.zip`.
+- `vivado/` — final integrated Block Design notes, top wrapper, and Basys3 constraints.
+- `stm32/stm_setting.zip` — complete STM32 sender/receiver CubeIDE projects used for the demonstration.
 
-Generated Vivado/Vitis/STM32 caches, run directories, object files, and temporary backups are intentionally excluded from this delivery folder.
+Generated Vivado/Vitis/STM32 caches, run directories, object files, and temporary backups are excluded.
 
 ## Final system
 
