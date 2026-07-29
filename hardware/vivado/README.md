@@ -1,17 +1,29 @@
 # Vivado Integration
 
-`vivado_project_files.zip` contains the final Vivado 2024.2 project file, final `system_bd.bd`, generated wrapper, and Basys3 XDC used for the hardware demonstration.
+The exact final Vivado 2024.2 Block Design is stored as verified Base64 parts under `bd/parts/`. Its size, SHA-256, Git blob SHA-1, required custom IP instances, and AXI addresses are defined in `bd/system_bd_manifest.json`.
 
-The custom IP source archives are stored under `hardware/ip/`. From the repository root, run:
+From the repository root, reconstruct and validate the final Block Design and all three packaged IP repositories:
 
 ```bash
 python3 hardware/vivado/scripts/prepare_vivado_project.py
 ```
 
-Then open:
+Create the Vivado project in batch mode:
 
-```text
-hardware/vivado/project/redundant_link/redundant_link.xpr
+```bash
+vivado -mode batch -source hardware/vivado/scripts/create_project.tcl
 ```
 
-The Digilent Basys3 board files must be installed in Vivado. Regenerate Block Design output products if Vivado requests it.
+Both steps can also be executed together:
+
+```bash
+python3 hardware/vivado/scripts/prepare_vivado_project.py --run-vivado
+```
+
+The generated project is written to:
+
+```text
+hardware/vivado/build/project/redundant_link.xpr
+```
+
+Requirements: Vivado 2024.2 and the Digilent Basys3 board files. The generated `build/` directory is intentionally excluded from Git.
